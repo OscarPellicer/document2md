@@ -1,4 +1,0 @@
-interface:
-  display_name: "Office to Markdown"
-  short_description: "Convert DOCX, PPTX, and XLSX to readable Markdown"
-  default_prompt: "Use $office2md to convert these Office files into faithful, readable Markdown."

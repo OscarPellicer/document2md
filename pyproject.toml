@@ -3,9 +3,9 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "office2md"
+name = "document2md"
 version = "0.1.0"
-description = "Convert DOCX, PPTX, and XLSX files to faithful, readable Markdown."
+description = "Convert PDF, DOCX, PPTX, and XLSX files to faithful, readable Markdown."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -14,18 +14,19 @@ dependencies = [
   "python-docx>=1.2",
   "python-pptx>=1.0",
   "openpyxl>=3.1",
+  "docling>=2.43",
+  "onnxruntime>=1.18",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3"]
 
 [project.scripts]
-office2md = "office2md.cli:main"
+document2md = "document2md.cli:main"
 
 [tool.setuptools]
-package-dir = { office2md = "skills/office2md/scripts/office2md" }
-packages = ["office2md"]
+package-dir = { document2md = "skills/document2md/scripts/document2md" }
+packages = ["document2md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document to Markdown"
+  short_description: "Convert PDF and Office files to readable Markdown"
+  default_prompt: "Use $document2md to convert these PDF or Office files into faithful, readable Markdown."

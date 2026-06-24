@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -15,7 +16,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
-SUPPORTED_SUFFIXES = {".docx", ".pptx", ".xlsx"}
+SUPPORTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx"}
 
 
 @dataclass(slots=True)
@@ -23,6 +24,7 @@ class ConversionOptions:
     values_only: bool = False
     include_hidden: bool = False
     include_notes: bool = False
+    images: str = "placeholder"
     force: bool = False
     assets_dir: Path | None = None
 
@@ -205,10 +207,14 @@ def _convert_docx(path: Path, output_path: Path, options: ConversionOptions) -> 
         markdown = _docx_paragraph(block) if isinstance(block, Paragraph) else _docx_table(block)
         if markdown:
             blocks.append(markdown)
-    assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
-    image_links, assets = _extract_docx_images(document, output_path, assets_dir)
-    if image_links:
-        blocks.extend(["## Extracted images", *image_links])
+    assets = []
+    if options.images == "extract":
+        assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
+        image_links, assets = _extract_docx_images(document, output_path, assets_dir)
+        if image_links:
+            blocks.extend(["## Extracted images", *image_links])
+    elif options.images == "embed":
+        raise ValueError("--images embed is supported only for PDF inputs.")
     return "\n\n".join(blocks).rstrip() + "\n", assets, []
 
 
@@ -246,6 +252,8 @@ def _convert_pptx(path: Path, output_path: Path, options: ConversionOptions) -> 
     warnings = []
     assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
     used: set[str] = set()
+    if options.images == "embed":
+        raise ValueError("--images embed is supported only for PDF inputs.")
 
     for slide_number, slide in enumerate(presentation.slides, start=1):
         title_shape = slide.shapes.title
@@ -262,6 +270,8 @@ def _convert_pptx(path: Path, output_path: Path, options: ConversionOptions) -> 
             if shape.has_table:
                 output.extend([_pptx_table(shape.table), ""])
             elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                if options.images != "extract":
+                    continue
                 image = shape.image
                 target = _asset_target(assets_dir, f"slide-{slide_number}-image", f".{image.ext}", used)
                 assets_dir.mkdir(parents=True, exist_ok=True)
@@ -281,6 +291,70 @@ def _convert_pptx(path: Path, output_path: Path, options: ConversionOptions) -> 
                 output.extend(["## Speaker notes", "", notes, ""])
 
     return "\n".join(output).rstrip() + "\n", assets, warnings
+
+
+def _create_pdf_converter(options: ConversionOptions):
+    try:
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import (
+            PdfPipelineOptions,
+            RapidOcrOptions,
+            TesseractCliOcrOptions,
+        )
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling_core.types.doc import ImageRefMode
+    except ImportError as error:
+        raise RuntimeError(
+            "PDF conversion requires Docling. Install the repository dependencies "
+            "or run with its .venv Python."
+        ) from error
+
+    ocr_options = (
+        TesseractCliOcrOptions()
+        if shutil.which("tesseract")
+        else RapidOcrOptions(backend="onnxruntime")
+    )
+    pipeline_options = PdfPipelineOptions(
+        generate_picture_images=options.images in {"extract", "embed"},
+        ocr_options=ocr_options,
+    )
+    converter = DocumentConverter(
+        allowed_formats=[InputFormat.PDF],
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+        },
+    )
+    return converter, ImageRefMode
+
+
+def _serialize_pdf_document(
+    document,
+    output_path: Path,
+    options: ConversionOptions,
+    image_ref_mode,
+) -> tuple[str, list[Path], list[str]]:
+    ImageRefMode = image_ref_mode
+
+    if options.images == "extract":
+        assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        document.save_as_markdown(
+            output_path,
+            image_mode=ImageRefMode.REFERENCED,
+            artifacts_dir=assets_dir,
+        )
+        assets = sorted(item for item in assets_dir.rglob("*") if item.is_file())
+        return output_path.read_text(encoding="utf-8"), assets, []
+
+    image_mode = ImageRefMode.EMBEDDED if options.images == "embed" else ImageRefMode.PLACEHOLDER
+    markdown = document.export_to_markdown(image_mode=image_mode)
+    return markdown.rstrip() + "\n", [], []
+
+
+def _convert_pdf(path: Path, output_path: Path, options: ConversionOptions) -> tuple[str, list[Path], list[str]]:
+    converter, image_ref_mode = _create_pdf_converter(options)
+    document = converter.convert(path).document
+    return _serialize_pdf_document(document, output_path, options, image_ref_mode)
 
 
 def _xlsx_value(value) -> str:
@@ -332,18 +406,66 @@ def convert_file(input_path: str | Path, output_path: str | Path | None = None, 
         raise FileNotFoundError(f"Input file does not exist: {source}")
     suffix = source.suffix.lower()
     if suffix not in SUPPORTED_SUFFIXES:
-        raise ValueError(f"Unsupported input type {suffix!r}; expected DOCX, PPTX, or XLSX.")
+        raise ValueError(f"Unsupported input type {suffix!r}; expected PDF, DOCX, PPTX, or XLSX.")
+    if options.images not in {"placeholder", "extract", "embed"}:
+        raise ValueError("images must be one of: placeholder, extract, embed.")
 
     requested = Path(output_path).expanduser() if output_path else source.with_suffix(".md")
     target = _unique_path(requested.resolve(), options.force)
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    if suffix == ".docx":
+    if suffix == ".pdf":
+        markdown, assets, warnings = _convert_pdf(source, target, options)
+    elif suffix == ".docx":
         markdown, assets, warnings = _convert_docx(source, target, options)
     elif suffix == ".pptx":
         markdown, assets, warnings = _convert_pptx(source, target, options)
     else:
         markdown, assets, warnings = _convert_xlsx(source, target, options)
 
-    target.write_text(markdown, encoding="utf-8", newline="\n")
+    if not target.exists() or suffix != ".pdf" or options.images != "extract":
+        target.write_text(markdown, encoding="utf-8", newline="\n")
     return ConversionResult(source, target, assets, warnings)
+
+
+def convert_files(
+    input_paths: Iterable[str | Path],
+    output_paths: Iterable[str | Path],
+    options: ConversionOptions | None = None,
+) -> list[ConversionResult]:
+    """Convert several files, reusing one Docling converter for all PDFs."""
+    options = options or ConversionOptions()
+    pairs = list(zip(input_paths, output_paths, strict=True))
+    results: list[ConversionResult | None] = [None] * len(pairs)
+    pdf_jobs: list[tuple[int, Path, Path]] = []
+
+    for index, (raw_input, raw_output) in enumerate(pairs):
+        source = Path(raw_input).expanduser().resolve()
+        if source.suffix.lower() == ".pdf":
+            if not source.is_file():
+                raise FileNotFoundError(f"Input file does not exist: {source}")
+            target = _unique_path(Path(raw_output).expanduser().resolve(), options.force)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            pdf_jobs.append((index, source, target))
+        else:
+            results[index] = convert_file(raw_input, raw_output, options)
+
+    if pdf_jobs:
+        converter, image_ref_mode = _create_pdf_converter(options)
+        sources = [source for _, source, _ in pdf_jobs]
+        try:
+            converted = converter.convert_all(sources)
+            for (index, source, target), conversion in zip(pdf_jobs, converted, strict=True):
+                markdown, assets, warnings = _serialize_pdf_document(
+                    conversion.document,
+                    target,
+                    options,
+                    image_ref_mode,
+                )
+                if not target.exists() or options.images != "extract":
+                    target.write_text(markdown, encoding="utf-8", newline="\n")
+                results[index] = ConversionResult(source, target, assets, warnings)
+        except Exception as error:
+            raise RuntimeError(f"Docling PDF conversion failed: {error}") from error
+
+    return [result for result in results if result is not None]
