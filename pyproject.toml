@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "office2md"
+version = "0.1.0"
+description = "Convert DOCX, PPTX, and XLSX files to faithful, readable Markdown."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Oscar J. Pellicer-Valero" }]
+dependencies = [
+  "python-docx>=1.2",
+  "python-pptx>=1.0",
+  "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+office2md = "office2md.cli:main"
+
+[tool.setuptools]
+package-dir = { office2md = "skills/office2md/scripts/office2md" }
+packages = ["office2md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
