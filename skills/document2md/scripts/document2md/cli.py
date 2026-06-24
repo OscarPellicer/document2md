@@ -25,6 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Image handling: placeholders, extracted files, or PDF-only base64 embedding.",
     )
     parser.add_argument("--force", action="store_true", help="Overwrite existing Markdown outputs.")
+    parser.add_argument(
+        "--pdf-pages-per-batch",
+        type=int,
+        default=10,
+        metavar="N",
+        help="PDF pages processed at once (default: 10; use 0 for the whole PDF).",
+    )
     return parser
 
 
@@ -72,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             images=args.images,
             force=args.force,
             assets_dir=Path(args.assets_dir).expanduser().resolve() if args.assets_dir else None,
+            pdf_pages_per_batch=args.pdf_pages_per_batch,
         )
         for result in convert_files(inputs, targets, options):
             print(result.output_path)

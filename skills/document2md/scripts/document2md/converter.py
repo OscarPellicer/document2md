@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from io import BytesIO
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -27,6 +28,7 @@ class ConversionOptions:
     images: str = "placeholder"
     force: bool = False
     assets_dir: Path | None = None
+    pdf_pages_per_batch: int = 10
 
 
 @dataclass(slots=True)
@@ -317,6 +319,10 @@ def _create_pdf_converter(options: ConversionOptions):
     pipeline_options = PdfPipelineOptions(
         generate_picture_images=options.images in {"extract", "embed"},
         ocr_options=ocr_options,
+        ocr_batch_size=1,
+        layout_batch_size=1,
+        table_batch_size=1,
+        queue_max_size=8,
     )
     converter = DocumentConverter(
         allowed_formats=[InputFormat.PDF],
@@ -325,6 +331,38 @@ def _create_pdf_converter(options: ConversionOptions):
         },
     )
     return converter, ImageRefMode
+
+
+def _pdf_page_count(path: Path) -> int:
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as error:
+        raise RuntimeError(
+            "PDF conversion requires pypdfium2 to count pages safely."
+        ) from error
+
+    document = pdfium.PdfDocument(path.read_bytes())
+    try:
+        return len(document)
+    finally:
+        document.close()
+
+
+def _pdf_stream(path: Path, batch_number: int = 0):
+    """Use bytes plus an ASCII-only name to avoid native-backend path encoding bugs."""
+    from docling_core.types.io import DocumentStream
+
+    name = f"document-{batch_number:04d}.pdf" if batch_number else "document.pdf"
+    return DocumentStream(name=name, stream=BytesIO(path.read_bytes()))
+
+
+def _pdf_page_ranges(page_count: int, pages_per_batch: int) -> list[tuple[int, int]]:
+    if pages_per_batch <= 0 or pages_per_batch >= page_count:
+        return [(1, page_count)]
+    return [
+        (start, min(start + pages_per_batch - 1, page_count))
+        for start in range(1, page_count + 1, pages_per_batch)
+    ]
 
 
 def _serialize_pdf_document(
@@ -351,10 +389,66 @@ def _serialize_pdf_document(
     return markdown.rstrip() + "\n", [], []
 
 
+def _convert_pdf_with_converter(
+    converter,
+    image_ref_mode,
+    path: Path,
+    output_path: Path,
+    options: ConversionOptions,
+) -> tuple[str, list[Path], list[str]]:
+    page_count = _pdf_page_count(path)
+    if page_count < 1:
+        raise RuntimeError(f"PDF has no pages: {path}")
+
+    ranges = _pdf_page_ranges(page_count, options.pdf_pages_per_batch)
+    markdown_parts: list[str] = []
+    assets: list[Path] = []
+    warnings: list[str] = []
+
+    for batch_number, page_range in enumerate(ranges, start=1):
+        conversion = converter.convert(
+            _pdf_stream(path, batch_number),
+            page_range=page_range,
+        )
+        document = conversion.document
+
+        if options.images == "extract" and len(ranges) > 1:
+            assets_root = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
+            chunk_assets = assets_root / f"pages-{page_range[0]:04d}-{page_range[1]:04d}"
+            chunk_output = output_path.with_name(
+                f".{output_path.stem}.pages-{page_range[0]:04d}-{page_range[1]:04d}.md"
+            )
+            chunk_options = ConversionOptions(
+                images="extract",
+                force=True,
+                assets_dir=chunk_assets,
+                pdf_pages_per_batch=options.pdf_pages_per_batch,
+            )
+            markdown, chunk_files, chunk_warnings = _serialize_pdf_document(
+                document,
+                chunk_output,
+                chunk_options,
+                image_ref_mode,
+            )
+            chunk_output.unlink(missing_ok=True)
+        else:
+            markdown, chunk_files, chunk_warnings = _serialize_pdf_document(
+                document,
+                output_path,
+                options,
+                image_ref_mode,
+            )
+
+        markdown_parts.append(markdown.strip())
+        assets.extend(chunk_files)
+        warnings.extend(chunk_warnings)
+
+    return "\n\n".join(part for part in markdown_parts if part).rstrip() + "\n", assets, warnings
+
+
 def _convert_pdf(path: Path, output_path: Path, options: ConversionOptions) -> tuple[str, list[Path], list[str]]:
     converter, image_ref_mode = _create_pdf_converter(options)
-    document = converter.convert(path).document
-    return _serialize_pdf_document(document, output_path, options, image_ref_mode)
+    return _convert_pdf_with_converter(converter, image_ref_mode, path, output_path, options)
 
 
 def _xlsx_value(value) -> str:
@@ -409,6 +503,8 @@ def convert_file(input_path: str | Path, output_path: str | Path | None = None, 
         raise ValueError(f"Unsupported input type {suffix!r}; expected PDF, DOCX, PPTX, or XLSX.")
     if options.images not in {"placeholder", "extract", "embed"}:
         raise ValueError("images must be one of: placeholder, extract, embed.")
+    if options.pdf_pages_per_batch < 0:
+        raise ValueError("pdf_pages_per_batch must be zero or a positive integer.")
 
     requested = Path(output_path).expanduser() if output_path else source.with_suffix(".md")
     target = _unique_path(requested.resolve(), options.force)
@@ -452,15 +548,14 @@ def convert_files(
 
     if pdf_jobs:
         converter, image_ref_mode = _create_pdf_converter(options)
-        sources = [source for _, source, _ in pdf_jobs]
         try:
-            converted = converter.convert_all(sources)
-            for (index, source, target), conversion in zip(pdf_jobs, converted, strict=True):
-                markdown, assets, warnings = _serialize_pdf_document(
-                    conversion.document,
+            for index, source, target in pdf_jobs:
+                markdown, assets, warnings = _convert_pdf_with_converter(
+                    converter,
+                    image_ref_mode,
+                    source,
                     target,
                     options,
-                    image_ref_mode,
                 )
                 if not target.exists() or options.images != "extract":
                     target.write_text(markdown, encoding="utf-8", newline="\n")

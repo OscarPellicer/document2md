@@ -21,6 +21,7 @@ python <skill>/scripts/convert_document.py path/to/input.ext --images placeholde
 ```
 
    When the skill is used from this repository and `<repo>/.venv` exists, prefer `<repo>/.venv/Scripts/python.exe` on Windows or `<repo>/.venv/bin/python` on Unix. Otherwise use an environment with `scripts/requirements.txt` installed.
+   PDFs are read through an ASCII-named in-memory stream, so Unicode characters in the source path do not reach Docling's native backend. PDFs are processed in ordered 10-page batches by default to cap memory use.
 
 4. For several inputs, pass all paths and an output directory:
 
@@ -56,7 +57,16 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 --include-hidden    XLSX: include hidden worksheets
 --include-notes     PPTX: include speaker notes
 --images MODE       placeholder (default), extract, or embed (PDF only)
+--pdf-pages-per-batch N
+                    PDF pages processed at once (default: 10; 0 disables batching)
 --force             Overwrite existing outputs
 ```
+
+## PDF troubleshooting
+
+- Keep the default `--pdf-pages-per-batch 10` for long or layout-heavy PDFs.
+- If memory is unusually constrained, retry with `--pdf-pages-per-batch 5` or `1`.
+- Use `--pdf-pages-per-batch 0` only when whole-document processing is specifically needed and sufficient memory is available.
+- Do not manually rename or copy a PDF solely because its path contains spaces, accents, or other Unicode characters; the converter handles this internally.
 
 Read [references/format-behavior.md](references/format-behavior.md) when the user asks about fidelity, limitations, or the exact mapping for a format.

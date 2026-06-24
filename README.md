@@ -20,12 +20,15 @@ The repository is skill-first: the canonical implementation lives inside `skills
 ```powershell
 python -m pip install -e .
 document2md document.pdf --images extract
+document2md long-document.pdf --pdf-pages-per-batch 5
 document2md document.docx
 document2md deck.pptx workbook.xlsx --output converted
 document2md workbook.xlsx --values-only --force
 ```
 
 The CLI writes one Markdown file per input. For a single input, `--output` may be an exact `.md` path. For multiple inputs, it must be a directory.
+
+PDF inputs are passed to Docling through an ASCII-named memory stream, so paths containing spaces, accents, or other Unicode characters are supported. Long PDFs are processed in ordered 10-page ranges by default to limit peak memory use. Use `--pdf-pages-per-batch 5` (or `1`) on a constrained machine, and `--pdf-pages-per-batch 0` to disable batching.
 
 For local development, the gitignored `.venv` contains all runtime and test dependencies:
 

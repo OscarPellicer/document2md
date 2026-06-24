@@ -148,16 +148,13 @@ def test_multiple_pdfs_share_one_docling_converter(tmp_path: Path, monkeypatch) 
         source.write_bytes(b"%PDF-test")
     targets = [tmp_path / "one.md", tmp_path / "two.md"]
     created = []
+    converted_paths = []
 
     class FakeConverter:
-        def convert_all(self, paths):
-            assert list(paths) == sources
-            return iter(
-                [
-                    SimpleNamespace(document=SimpleNamespace(name="one")),
-                    SimpleNamespace(document=SimpleNamespace(name="two")),
-                ]
-            )
+        def convert(self, source, *, page_range):
+            converted_paths.append((source.name, page_range))
+            name = "one" if len(converted_paths) == 1 else "two"
+            return SimpleNamespace(document=SimpleNamespace(name=name))
 
     def fake_create(options):
         created.append(options)
@@ -168,13 +165,70 @@ def test_multiple_pdfs_share_one_docling_converter(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr(converter_module, "_create_pdf_converter", fake_create)
     monkeypatch.setattr(converter_module, "_serialize_pdf_document", fake_serialize)
+    monkeypatch.setattr(converter_module, "_pdf_page_count", lambda path: 1)
 
     results = convert_files(sources, targets, ConversionOptions(force=True))
 
     assert len(created) == 1
+    assert converted_paths == [
+        ("document-0001.pdf", (1, 1)),
+        ("document-0001.pdf", (1, 1)),
+    ]
     assert [result.output_path for result in results] == targets
     assert targets[0].read_text(encoding="utf-8") == "# one\n"
     assert targets[1].read_text(encoding="utf-8") == "# two\n"
+
+
+def test_pdf_is_processed_in_ordered_page_ranges_with_ascii_stream_names(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "memória verificación.pdf"
+    source.write_bytes(b"%PDF-test")
+    output = tmp_path / "result.md"
+    calls = []
+
+    class FakeDocument:
+        def __init__(self, page_range):
+            self.page_range = page_range
+
+        def export_to_markdown(self, *, image_mode):
+            return f"pages {self.page_range[0]}-{self.page_range[1]}"
+
+    class FakeConverter:
+        def convert(self, stream, *, page_range):
+            calls.append((stream.name, page_range, stream.stream.read()))
+            return SimpleNamespace(document=FakeDocument(page_range))
+
+    monkeypatch.setattr(
+        converter_module,
+        "_create_pdf_converter",
+        lambda options: (
+            FakeConverter(),
+            SimpleNamespace(PLACEHOLDER="placeholder", EMBEDDED="embedded"),
+        ),
+    )
+    monkeypatch.setattr(converter_module, "_pdf_page_count", lambda path: 23)
+
+    convert_file(
+        source,
+        output,
+        ConversionOptions(force=True, pdf_pages_per_batch=10),
+    )
+
+    assert calls == [
+        ("document-0001.pdf", (1, 10), b"%PDF-test"),
+        ("document-0002.pdf", (11, 20), b"%PDF-test"),
+        ("document-0003.pdf", (21, 23), b"%PDF-test"),
+    ]
+    assert output.read_text(encoding="utf-8") == (
+        "pages 1-10\n\npages 11-20\n\npages 21-23\n"
+    )
+
+
+def test_pdf_page_ranges_can_disable_batching() -> None:
+    assert converter_module._pdf_page_ranges(101, 0) == [(1, 101)]
+    assert converter_module._pdf_page_ranges(5, 10) == [(1, 5)]
 
 
 def test_pdf_extract_mode_uses_accompanying_artifacts_folder(tmp_path: Path) -> None:
