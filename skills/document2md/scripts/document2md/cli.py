@@ -7,6 +7,14 @@ from pathlib import Path
 from .converter import ConversionOptions, SUPPORTED_SUFFIXES, convert_files
 
 
+def _configure_text_streams() -> None:
+    """Prefer UTF-8 console output on Windows terminals with legacy code pages."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="document2md",
@@ -52,6 +60,7 @@ def _input_paths(raw_inputs: list[str]) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_text_streams()
     args = build_parser().parse_args(argv)
     try:
         inputs = _input_paths(args.inputs)

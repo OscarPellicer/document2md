@@ -75,19 +75,74 @@ def _render_table(rows: list[list[object]]) -> str:
     )
 
 
+def _plain_table(rows: list[list[str]]) -> str:
+    """Render a table as compact text for contexts where Markdown tables cannot nest."""
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    padded = [row + [""] * (width - len(row)) for row in rows]
+    if len(padded) == 1:
+        return "; ".join(value for value in padded[0] if value)
+    if width == 2:
+        pairs = []
+        for key, value in padded:
+            if key and value:
+                pairs.append(f"{key}: {value}")
+            elif key or value:
+                pairs.append(key or value)
+        return "; ".join(pairs)
+    return "; ".join(" / ".join(value for value in row if value) for row in padded)
+
+
+def _iter_paragraph_runs(paragraph: Paragraph):
+    for child in paragraph._p.iterchildren():
+        if child.tag.endswith("}r"):
+            yield child
+        elif child.tag.endswith("}hyperlink"):
+            yield from (grandchild for grandchild in child.iterchildren() if grandchild.tag.endswith("}r"))
+
+
+def _run_text(run_element) -> str:
+    texts = []
+    for text_element in run_element.iter():
+        if text_element.tag.endswith("}t"):
+            texts.append(text_element.text or "")
+        elif text_element.tag.endswith("}tab"):
+            texts.append("\t")
+        elif text_element.tag.endswith("}br"):
+            texts.append("\n")
+    return "".join(texts)
+
+
+def _run_bool(run_element, name: str) -> bool | None:
+    rpr = next((child for child in run_element.iterchildren() if child.tag.endswith("}rPr")), None)
+    if rpr is None:
+        return None
+    prop = next((child for child in rpr.iterchildren() if child.tag.endswith(f"}}{name}")), None)
+    if prop is None:
+        return None
+    value = prop.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+    return value not in {"0", "false", "False", "off"}
+
+
 def _styled_runs(runs: Iterable) -> str:
     pieces: list[list[object]] = []
     for run in runs:
-        text = run.text
+        if hasattr(run, "tag"):
+            text = _run_text(run)
+            bold = _run_bool(run, "b")
+            italic = _run_bool(run, "i")
+        else:
+            text = run.text
+            font = getattr(run, "font", None)
+            bold = getattr(run, "bold", None)
+            italic = getattr(run, "italic", None)
+            if bold is None and font is not None:
+                bold = font.bold
+            if italic is None and font is not None:
+                italic = font.italic
         if not text:
             continue
-        font = getattr(run, "font", None)
-        bold = getattr(run, "bold", None)
-        italic = getattr(run, "italic", None)
-        if bold is None and font is not None:
-            bold = font.bold
-        if italic is None and font is not None:
-            italic = font.italic
         style = (bool(bold), bool(italic)) if text.strip() else None
         pieces.append([text, style])
 
@@ -123,7 +178,7 @@ def _styled_runs(runs: Iterable) -> str:
 
 
 def _docx_paragraph(paragraph: Paragraph, in_table: bool = False) -> str:
-    text = _styled_runs(paragraph.runs)
+    text = _styled_runs(_iter_paragraph_runs(paragraph))
     if not text:
         return ""
     style = paragraph.style.name if paragraph.style else ""
@@ -145,12 +200,15 @@ def _docx_blocks(document: DocxDocument):
             yield DocxTable(child, document)
 
 
-def _docx_cell(cell) -> str:
-    paragraphs = [_docx_paragraph(paragraph, in_table=True) for paragraph in cell.paragraphs]
-    return "<br>".join(paragraph for paragraph in paragraphs if paragraph)
+def _docx_cell_blocks(cell):
+    for child in cell._tc.iterchildren():
+        if child.tag.endswith("}p"):
+            yield Paragraph(child, cell)
+        elif child.tag.endswith("}tbl"):
+            yield DocxTable(child, cell)
 
 
-def _docx_table(table: DocxTable) -> str:
+def _docx_table_rows(table: DocxTable) -> list[list[str]]:
     rows: list[list[str]] = []
     seen = set()
     for row in table.rows:
@@ -163,6 +221,23 @@ def _docx_table(table: DocxTable) -> str:
                 seen.add(key)
                 values.append(_docx_cell(cell))
         rows.append(values)
+    return rows
+
+
+def _docx_cell(cell) -> str:
+    blocks = []
+    for block in _docx_cell_blocks(cell):
+        if isinstance(block, Paragraph):
+            markdown = _docx_paragraph(block, in_table=True)
+        else:
+            markdown = _plain_table(_docx_table_rows(block))
+        if markdown:
+            blocks.append(markdown)
+    return "<br>".join(blocks)
+
+
+def _docx_table(table: DocxTable) -> str:
+    rows = _docx_table_rows(table)
     return _render_table(rows)
 
 

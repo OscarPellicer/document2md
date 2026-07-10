@@ -20,7 +20,7 @@ Convert Office files to Markdown with the bundled format-aware converter. Treat 
 python <skill>/scripts/convert_document.py path/to/input.ext --images placeholder
 ```
 
-   When the skill is used from this repository and `<repo>/.venv` exists, prefer `<repo>/.venv/Scripts/python.exe` on Windows or `<repo>/.venv/bin/python` on Unix. Otherwise use an environment with `scripts/requirements.txt` installed.
+   When the `document2md` repository has its own virtual environment, prefer that interpreter even if the current workspace is elsewhere: `C:\Users\Oscar\document2md\.venv\Scripts\python.exe` on this Windows machine, or `<document2md-repo>/.venv/bin/python` on Unix. If the repo-local venv is unavailable, use an environment with `scripts/requirements.txt` installed.
    PDFs are read through an ASCII-named in-memory stream, so Unicode characters in the source path do not reach Docling's native backend. PDFs are processed in ordered 10-page batches by default to cap memory use.
 
 4. For several inputs, pass all paths and an output directory:
@@ -40,6 +40,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 - Convert PDFs with Docling's standard pipeline, including OCR and layout-aware table reconstruction when needed.
 - Convert every Word or PowerPoint table to a Markdown table.
 - Represent merged table cells once; leave repeated grid positions blank because Markdown has no native row/column spans.
+- When a Word table is nested inside another table cell, render the nested table as compact inline text inside that cell. Markdown cannot represent true nested tables, so preserve source order and cell content instead of emitting escaped table syntax that looks like a broken table.
 - Use Word heading styles as Markdown headings. Do not promote bold paragraphs to headings.
 - Represent each PowerPoint slide as a section, using its title placeholder when available.
 - Preserve slide reading order using shape position, then shape order.

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from openpyxl import Workbook
 from PIL import Image
 from pptx import Presentation
@@ -57,6 +60,56 @@ def test_docx_does_not_infer_bold_heading_and_keeps_merged_table_grid(tmp_path: 
     assert "**Bold but not a heading**" in markdown
     assert "# Bold but not a heading" not in markdown
     assert "| Merged |  | Third |" in markdown
+
+
+def test_docx_renders_nested_tables_inside_cells_as_compact_text(tmp_path: Path) -> None:
+    document = Document()
+    outer = document.add_table(rows=1, cols=1)
+    cell = outer.cell(0, 0)
+    cell.text = "Before nested table."
+    nested = cell.add_table(rows=3, cols=2)
+    nested.cell(0, 0).text = "Concept"
+    nested.cell(0, 1).text = "Weight"
+    nested.cell(1, 0).text = "Continuous assessment"
+    nested.cell(1, 1).text = "30%"
+    nested.cell(2, 0).text = "Final exam"
+    nested.cell(2, 1).text = "70%"
+    cell.add_paragraph("After nested table.")
+    source = tmp_path / "nested-table.docx"
+    document.save(source)
+
+    markdown = convert_file(source, options=ConversionOptions(force=True)).output_path.read_text(encoding="utf-8")
+
+    assert "Before nested table." in markdown
+    assert "Concept: Weight; Continuous assessment: 30%; Final exam: 70%" in markdown
+    assert "\\| Concept" not in markdown
+    assert markdown.index("Before nested table.") < markdown.index("Concept")
+    assert markdown.index("70%") < markdown.index("After nested table.")
+
+
+def test_docx_includes_text_inside_hyperlinks(tmp_path: Path) -> None:
+    document = Document()
+    paragraph = document.add_paragraph("Regulation: ")
+    part = paragraph.part
+    rel_id = part.relate_to(
+        "https://example.test/regulation",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+        is_external=True,
+    )
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), rel_id)
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "https://example.test/regulation"
+    run.append(text)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+    source = tmp_path / "linked.docx"
+    document.save(source)
+
+    markdown = convert_file(source, options=ConversionOptions(force=True)).output_path.read_text(encoding="utf-8")
+
+    assert "Regulation: https://example.test/regulation" in markdown
 
 
 def test_docx_images_are_only_saved_when_requested(tmp_path: Path) -> None:
@@ -140,6 +193,25 @@ def test_skill_script_is_runnable_without_package_install(tmp_path: Path) -> Non
     )
     assert str(tmp_path / "book.md") in result.stdout
     assert "| A | B |" in (tmp_path / "book.md").read_text(encoding="utf-8")
+
+
+def test_skill_script_prints_unicode_paths_on_legacy_console(tmp_path: Path) -> None:
+    workbook = Workbook()
+    workbook.active.append(["A", "B"])
+    source = tmp_path / "Matema\u0301ticas II.xlsx"
+    workbook.save(source)
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "cp1252"
+
+    result = subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), str(source), "--force"],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+    assert "Matema" in result.stdout.decode("utf-8")
+    assert (tmp_path / "Matema\u0301ticas II.md").exists()
 
 
 def test_multiple_pdfs_share_one_docling_converter(tmp_path: Path, monkeypatch) -> None:
