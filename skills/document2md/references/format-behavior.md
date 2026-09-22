@@ -11,6 +11,11 @@
 - Docling reconstructs reading order, headings, lists, tables, formulas, and OCR text where available.
 - `--images placeholder` keeps lightweight image-position markers.
 - `--images extract` asks Docling to write referenced image artifacts to the accompanying assets folder.
+- Extracted image links are relative to the Markdown file. Docling emits absolute, percent-encoded URIs when handed an absolute artifacts directory, so the converter passes a relative one and rewrites any absolute link that remains.
+- With more than one page batch, each batch's images go into a `pages-NNNN-NNNN` subfolder of the assets directory; a single batch writes them flat.
+- `--ocr auto` OCRs bitmap areas only, `--ocr off` disables the OCR stage, and `--ocr force` OCRs every page.
+- `RapidOCR returned empty result!` means a region held no recognizable text. It is not by itself evidence of lost content.
+- Reading order, heading levels, and table cells come from Docling's layout models and can be wrong on dense pages. Page footers, signature blocks, and CSV stamps are not reproduced.
 - `--images embed` writes base64 images into Markdown and can make the file very large.
 - PDF extraction is computationally heavier than Office extraction and may download model files on first use.
 - `--pdf-pages-per-batch 0` disables page batching. Smaller positive values trade speed for lower peak memory.
@@ -43,6 +48,25 @@
 - `--values-only` requests cached formula results; results may be empty when the workbook was not recalculated before saving.
 - Merged-cell content appears in the top-left cell and other positions remain empty.
 - Styling, charts, conditional formatting, drawings, comments, and formulas' calculated display formatting are not reproduced.
+
+## OpenDocument
+
+- `.odt`, `.ods`, and `.odp` are read directly from `content.xml` with the standard library; no OpenDocument dependency is required.
+- Encoded whitespace is preserved: `text:s` runs, `text:tab`, and `text:line-break`.
+- `text:h` outline levels become Markdown heading levels. Bold paragraphs are not promoted.
+- Lists become Markdown lists, nested by list depth.
+- Tables use the stored grid. Repeated cells and rows are expanded, and cells covered by a merge stay empty.
+- Sheets hidden with `table:display="false"` are skipped unless `--include-hidden` is passed, and each skipped sheet is reported as a warning.
+- Each `draw:page` becomes a slide section, named by its `draw:name` when present.
+- Images referenced from the archive are extracted only when `--images extract` is selected.
+- Form controls, change tracking, styles, and page layout are not reconstructed.
+
+## Batches and failures
+
+- Each input is converted independently. A failure is recorded and the batch continues, so one unreadable file cannot discard work queued behind it.
+- The CLI prints every failure to stderr and exits `1` when any input failed while others succeeded.
+- `--strict` re-raises the first failure instead.
+- The Markdown a run produced is always written, including when Docling wrote an intermediate file itself.
 
 ## Why this differs from Pandoc
 
