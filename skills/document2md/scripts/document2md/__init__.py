@@ -1,6 +1,20 @@
-"""Format-aware PDF and Microsoft Office to Markdown conversion."""
+"""Format-aware PDF, Office and OpenDocument to Markdown conversion."""
 
-from .converter import ConversionOptions, ConversionResult, convert_file, convert_files
+from .converter import (
+    BatchResult,
+    ConversionFailure,
+    ConversionOptions,
+    ConversionResult,
+    convert_file,
+    convert_files,
+)
 
-__all__ = ["ConversionOptions", "ConversionResult", "convert_file", "convert_files"]
-__version__ = "0.1.0"
+__all__ = [
+    "BatchResult",
+    "ConversionFailure",
+    "ConversionOptions",
+    "ConversionResult",
+    "convert_file",
+    "convert_files",
+]
+__version__ = "0.2.0"

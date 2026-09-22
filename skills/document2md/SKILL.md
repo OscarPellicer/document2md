@@ -1,15 +1,15 @@
 ---
 name: document2md
-description: Convert PDF and Microsoft Office files (.pdf, .docx, .pptx, and .xlsx) to faithful, readable Markdown using Docling and format-aware Python libraries instead of Pandoc or PyMuPDF. Use when Codex needs an editable or reviewable Markdown representation of PDFs, Word documents, PowerPoint presentations, or Excel workbooks while preserving tables and source order without inventing semantic structure.
+description: Convert PDF, Microsoft Office and OpenDocument files (.pdf, .docx, .pptx, .xlsx, .odt, .ods, .odp) to faithful, readable Markdown using Docling and format-aware Python libraries instead of Pandoc or PyMuPDF. Use when Codex needs an editable or reviewable Markdown representation of PDFs, Word documents, PowerPoint presentations, Excel workbooks, or OpenDocument files while preserving tables and source order without inventing semantic structure.
 ---
 
 # document2md
 
-Convert Office files to Markdown with the bundled format-aware converter. Treat conversion as extraction, not reinterpretation: preserve encoded structure and do not infer headings, fields, checklist controls, or relationships that the source does not explicitly represent.
+Convert documents to Markdown with the bundled format-aware converter. Treat conversion as extraction, not reinterpretation: preserve encoded structure and do not infer headings, fields, checklist controls, or relationships that the source does not explicitly represent.
 
 ## Workflow
 
-1. Confirm the input extension is `.pdf`, `.docx`, `.pptx`, or `.xlsx`.
+1. Confirm the input extension is `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.ods`, or `.odp`.
 2. Choose image handling:
    - Use `--images placeholder` for text-first review, small output, or when images are decorative.
    - Use `--images extract` when figures, diagrams, screenshots, scanned material, or visual evidence matter. Return the generated asset folder with the Markdown.
@@ -20,7 +20,12 @@ Convert Office files to Markdown with the bundled format-aware converter. Treat 
 python <skill>/scripts/convert_document.py path/to/input.ext --images placeholder
 ```
 
-   When the `document2md` repository has its own virtual environment, prefer that interpreter even if the current workspace is elsewhere: `C:\Users\Oscar\document2md\.venv\Scripts\python.exe` on this Windows machine, or `<document2md-repo>/.venv/bin/python` on Unix. If the repo-local venv is unavailable, use an environment with `scripts/requirements.txt` installed.
+   Run it with any Python 3.11+ interpreter. On its first run the script creates
+   `<skill>/.venv`, installs `scripts/requirements.txt` into it, and re-executes
+   itself there; every later run reuses that same environment automatically. Do
+   not hunt for an interpreter, hardcode one, or activate anything by hand. Pass
+   `--no-bootstrap` to stay in the current interpreter when its dependencies are
+   already installed.
    PDFs are read through an ASCII-named in-memory stream, so Unicode characters in the source path do not reach Docling's native backend. PDFs are processed in ordered 10-page batches by default to cap memory use.
 
 4. For several inputs, pass all paths and an output directory:
@@ -30,9 +35,14 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 ```
 
    The CLI batches all PDF inputs through one shared Docling `DocumentConverter`. Do not invoke the script separately in a loop for multiple PDFs.
+   An input that fails is reported on stderr and the batch continues, so a single unreadable file does not cost the rest of the run. Exit code `1` means some inputs failed while others were converted; `2` means the invocation itself was rejected. Read stderr and report which inputs failed rather than assuming a whole-batch success.
 
-5. Inspect the Markdown for structural completeness. Compare the number and order of source tables, slides, and worksheets when fidelity matters.
-6. Return the Markdown and its generated assets directory when `--images extract` was selected.
+5. Choose OCR handling for PDFs with `--ocr`:
+   - `auto` (default) OCRs bitmap areas only.
+   - `off` skips OCR entirely. Much faster, and correct for born-digital PDFs.
+   - `force` OCRs every page. Use it for scans and for pages whose text layer is missing or wrong.
+6. Inspect the Markdown for structural completeness. Compare the number and order of source tables, slides, and worksheets when fidelity matters.
+7. Return the Markdown and its generated assets directory when `--images extract` was selected.
 
 ## Conversion rules
 
@@ -46,7 +56,8 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 - Preserve slide reading order using shape position, then shape order.
 - Represent each non-empty worksheet as a section and its used range as a Markdown table.
 - Preserve formulas by default. Use `--values-only` only when the user wants cached values.
-- Extract PDF/DOCX/PPTX images beside the Markdown and link them relatively only when `--images extract` is selected.
+- Represent each OpenDocument heading, list, paragraph, and table in stored order; `.ods` sheets and `.odp` slides become sections like their Office equivalents.
+- Extract PDF/DOCX/PPTX/ODF images beside the Markdown and link them relatively only when `--images extract` is selected. Image links are always relative to the Markdown file, so the file and its assets folder can be moved together.
 - Do not silently repair text split across tables, slides, cells, or paragraphs.
 
 ## Options
@@ -55,9 +66,12 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 --output PATH       Exact .md path for one input, or output directory
 --assets-dir PATH   Asset directory for one input
 --values-only       XLSX: export cached values instead of formulas
---include-hidden    XLSX: include hidden worksheets
+--include-hidden    XLSX/ODS: include hidden worksheets
 --include-notes     PPTX: include speaker notes
 --images MODE       placeholder (default), extract, or embed (PDF only)
+--ocr MODE          PDF OCR: auto (default), off, or force
+--strict            Stop at the first failing input instead of converting the rest
+--no-bootstrap      Do not create or re-exec into the skill's own virtual environment
 --pdf-pages-per-batch N
                     PDF pages processed at once (default: 10; 0 disables batching)
 --force             Overwrite existing outputs
@@ -69,5 +83,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 - If memory is unusually constrained, retry with `--pdf-pages-per-batch 5` or `1`.
 - Use `--pdf-pages-per-batch 0` only when whole-document processing is specifically needed and sufficient memory is available.
 - Do not manually rename or copy a PDF solely because its path contains spaces, accents, or other Unicode characters; the converter handles this internally.
+- Use `--ocr off` for born-digital PDFs. It removes the OCR stage, which dominates runtime, and silences `RapidOCR returned empty result!` notices that do not indicate lost text.
+- Docling reconstructs reading order and tables statistically. Heading order and table cells can be wrong on dense layouts, and signature blocks, footers, and CSV stamps are not carried over. Check the original before relying on such a passage; do not repair it silently in the Markdown.
 
 Read [references/format-behavior.md](references/format-behavior.md) when the user asks about fidelity, limitations, or the exact mapping for a format.

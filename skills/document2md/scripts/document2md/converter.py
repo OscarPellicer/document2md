@@ -7,6 +7,8 @@ from io import BytesIO
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import quote, unquote, urlparse
+from urllib.request import url2pathname
 
 from docx import Document
 from docx.document import Document as DocxDocument
@@ -17,7 +19,10 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
-SUPPORTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx"}
+OFFICE_SUFFIXES = {".docx", ".pptx", ".xlsx"}
+OPENDOCUMENT_SUFFIXES = {".odt", ".ods", ".odp"}
+SUPPORTED_SUFFIXES = {".pdf"} | OFFICE_SUFFIXES | OPENDOCUMENT_SUFFIXES
+OCR_MODES = {"auto", "off", "force"}
 
 
 @dataclass(slots=True)
@@ -29,6 +34,7 @@ class ConversionOptions:
     force: bool = False
     assets_dir: Path | None = None
     pdf_pages_per_batch: int = 10
+    ocr: str = "auto"
 
 
 @dataclass(slots=True)
@@ -37,6 +43,18 @@ class ConversionResult:
     output_path: Path
     assets: list[Path]
     warnings: list[str]
+
+
+@dataclass(slots=True)
+class ConversionFailure:
+    input_path: Path
+    error: Exception
+
+
+@dataclass(slots=True)
+class BatchResult:
+    results: list[ConversionResult]
+    failures: list[ConversionFailure]
 
 
 def _clean_inline(text: str) -> str:
@@ -256,6 +274,33 @@ def _relative_link(target: Path, output_path: Path) -> str:
     return Path(os.path.relpath(target, output_path.parent)).as_posix()
 
 
+_MARKDOWN_IMAGE = re.compile(r"(!\[[^\]]*\]\()([^)\s]+)(\))")
+
+
+def _relativize_markdown_links(markdown: str, output_path: Path) -> str:
+    """Rewrite absolute image targets as paths relative to the Markdown file.
+
+    Docling emits absolute ``file:``-style URIs whenever it is handed an
+    absolute artifacts directory, which breaks the Markdown as soon as the
+    folder is moved. Links that are already relative, or that point at a real
+    remote URL, are left untouched.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        target = match.group(2)
+        if target.startswith("data:"):
+            return match.group(0)
+        if target.startswith("file://"):
+            path = Path(url2pathname(urlparse(target).path))
+        elif target.startswith("/"):
+            path = Path(unquote(target))
+        else:
+            return match.group(0)
+        return f"{match.group(1)}{quote(_relative_link(path, output_path))}{match.group(3)}"
+
+    return _MARKDOWN_IMAGE.sub(replace, markdown)
+
+
 def _extract_docx_images(document, output_path: Path, assets_dir: Path) -> tuple[list[str], list[Path]]:
     links = []
     assets = []
@@ -391,8 +436,16 @@ def _create_pdf_converter(options: ConversionOptions):
         if shutil.which("tesseract")
         else RapidOcrOptions(backend="onnxruntime")
     )
+    if options.ocr == "force":
+        try:
+            from docling.datamodel.pipeline_options import OcrMode
+
+            ocr_options.mode = OcrMode.FULL_PAGE
+        except ImportError:  # Docling older than the OcrMode enum.
+            ocr_options.force_full_page_ocr = True
     pipeline_options = PdfPipelineOptions(
         generate_picture_images=options.images in {"extract", "embed"},
+        do_ocr=options.ocr != "off",
         ocr_options=ocr_options,
         ocr_batch_size=1,
         layout_batch_size=1,
@@ -451,13 +504,16 @@ def _serialize_pdf_document(
     if options.images == "extract":
         assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
         assets_dir.mkdir(parents=True, exist_ok=True)
+        # Docling only writes relative image links when the artifacts directory
+        # it receives is itself relative to the Markdown file.
         document.save_as_markdown(
             output_path,
             image_mode=ImageRefMode.REFERENCED,
-            artifacts_dir=assets_dir,
+            artifacts_dir=Path(os.path.relpath(assets_dir, output_path.parent)),
         )
         assets = sorted(item for item in assets_dir.rglob("*") if item.is_file())
-        return output_path.read_text(encoding="utf-8"), assets, []
+        markdown = _relativize_markdown_links(output_path.read_text(encoding="utf-8"), output_path)
+        return markdown.rstrip() + "\n", assets, []
 
     image_mode = ImageRefMode.EMBEDDED if options.images == "embed" else ImageRefMode.PLACEHOLDER
     markdown = document.export_to_markdown(image_mode=image_mode)
@@ -526,6 +582,21 @@ def _convert_pdf(path: Path, output_path: Path, options: ConversionOptions) -> t
     return _convert_pdf_with_converter(converter, image_ref_mode, path, output_path, options)
 
 
+def _convert_opendocument(path: Path, output_path: Path, options: ConversionOptions) -> tuple[str, list[Path], list[str]]:
+    from . import opendocument
+
+    if options.images == "embed":
+        raise ValueError("--images embed is supported only for PDF inputs.")
+    extract = options.images == "extract"
+    assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
+    suffix = path.suffix.lower()
+    if suffix == ".odt":
+        return opendocument.convert_text(path, output_path, extract, assets_dir)
+    if suffix == ".ods":
+        return opendocument.convert_spreadsheet(path, options.include_hidden)
+    return opendocument.convert_presentation(path, output_path, extract, assets_dir)
+
+
 def _xlsx_value(value) -> str:
     if value is None:
         return ""
@@ -580,6 +651,8 @@ def convert_file(input_path: str | Path, output_path: str | Path | None = None, 
         raise ValueError("images must be one of: placeholder, extract, embed.")
     if options.pdf_pages_per_batch < 0:
         raise ValueError("pdf_pages_per_batch must be zero or a positive integer.")
+    if options.ocr not in OCR_MODES:
+        raise ValueError("ocr must be one of: auto, off, force.")
 
     requested = Path(output_path).expanduser() if output_path else source.with_suffix(".md")
     target = _unique_path(requested.resolve(), options.force)
@@ -591,11 +664,15 @@ def convert_file(input_path: str | Path, output_path: str | Path | None = None, 
         markdown, assets, warnings = _convert_docx(source, target, options)
     elif suffix == ".pptx":
         markdown, assets, warnings = _convert_pptx(source, target, options)
-    else:
+    elif suffix == ".xlsx":
         markdown, assets, warnings = _convert_xlsx(source, target, options)
+    else:
+        markdown, assets, warnings = _convert_opendocument(source, target, options)
 
-    if not target.exists() or suffix != ".pdf" or options.images != "extract":
-        target.write_text(markdown, encoding="utf-8", newline="\n")
+    # Always write what was produced. Docling may have written the file itself
+    # during extraction, but only for the single-batch path, and its version
+    # still carries unrelativized links.
+    target.write_text(markdown, encoding="utf-8", newline="\n")
     return ConversionResult(source, target, assets, warnings)
 
 
@@ -603,28 +680,47 @@ def convert_files(
     input_paths: Iterable[str | Path],
     output_paths: Iterable[str | Path],
     options: ConversionOptions | None = None,
-) -> list[ConversionResult]:
-    """Convert several files, reusing one Docling converter for all PDFs."""
+    strict: bool = False,
+) -> BatchResult:
+    """Convert several files, reusing one Docling converter for all PDFs.
+
+    A file that fails is recorded and the rest of the batch still runs, so one
+    unreadable input cannot discard the work already queued behind it. Pass
+    ``strict=True`` to re-raise the first failure instead.
+    """
     options = options or ConversionOptions()
     pairs = list(zip(input_paths, output_paths, strict=True))
     results: list[ConversionResult | None] = [None] * len(pairs)
+    failures: list[ConversionFailure] = []
     pdf_jobs: list[tuple[int, Path, Path]] = []
 
     for index, (raw_input, raw_output) in enumerate(pairs):
         source = Path(raw_input).expanduser().resolve()
-        if source.suffix.lower() == ".pdf":
-            if not source.is_file():
-                raise FileNotFoundError(f"Input file does not exist: {source}")
-            target = _unique_path(Path(raw_output).expanduser().resolve(), options.force)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            pdf_jobs.append((index, source, target))
-        else:
-            results[index] = convert_file(raw_input, raw_output, options)
+        try:
+            if source.suffix.lower() == ".pdf":
+                if not source.is_file():
+                    raise FileNotFoundError(f"Input file does not exist: {source}")
+                target = _unique_path(Path(raw_output).expanduser().resolve(), options.force)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                pdf_jobs.append((index, source, target))
+            else:
+                results[index] = convert_file(raw_input, raw_output, options)
+        except Exception as error:
+            if strict:
+                raise
+            failures.append(ConversionFailure(source, error))
 
     if pdf_jobs:
-        converter, image_ref_mode = _create_pdf_converter(options)
         try:
-            for index, source, target in pdf_jobs:
+            converter, image_ref_mode = _create_pdf_converter(options)
+        except Exception as error:
+            if strict:
+                raise
+            for _, source, _target in pdf_jobs:
+                failures.append(ConversionFailure(source, error))
+            pdf_jobs = []
+        for index, source, target in pdf_jobs:
+            try:
                 markdown, assets, warnings = _convert_pdf_with_converter(
                     converter,
                     image_ref_mode,
@@ -632,10 +728,13 @@ def convert_files(
                     target,
                     options,
                 )
-                if not target.exists() or options.images != "extract":
-                    target.write_text(markdown, encoding="utf-8", newline="\n")
+                target.write_text(markdown, encoding="utf-8", newline="\n")
                 results[index] = ConversionResult(source, target, assets, warnings)
-        except Exception as error:
-            raise RuntimeError(f"Docling PDF conversion failed: {error}") from error
+            except Exception as error:
+                if strict:
+                    raise RuntimeError(f"Docling PDF conversion failed for {source}: {error}") from error
+                failures.append(
+                    ConversionFailure(source, RuntimeError(f"Docling PDF conversion failed: {error}"))
+                )
 
-    return [result for result in results if result is not None]
+    return BatchResult([result for result in results if result is not None], failures)

@@ -239,8 +239,10 @@ def test_multiple_pdfs_share_one_docling_converter(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(converter_module, "_serialize_pdf_document", fake_serialize)
     monkeypatch.setattr(converter_module, "_pdf_page_count", lambda path: 1)
 
-    results = convert_files(sources, targets, ConversionOptions(force=True))
+    batch = convert_files(sources, targets, ConversionOptions(force=True))
+    results = batch.results
 
+    assert batch.failures == []
     assert len(created) == 1
     assert converted_paths == [
         ("document-0001.pdf", (1, 1)),
@@ -305,9 +307,12 @@ def test_pdf_page_ranges_can_disable_batching() -> None:
 
 def test_pdf_extract_mode_uses_accompanying_artifacts_folder(tmp_path: Path) -> None:
     class FakeDocument:
+        """Mimics docling_core: a relative artifacts_dir resolves against the Markdown."""
+
         def save_as_markdown(self, filename, *, image_mode, artifacts_dir):
-            artifacts_dir.mkdir(parents=True, exist_ok=True)
-            (artifacts_dir / "picture.png").write_bytes(b"png")
+            resolved = artifacts_dir if artifacts_dir.is_absolute() else filename.parent / artifacts_dir
+            resolved.mkdir(parents=True, exist_ok=True)
+            (resolved / "picture.png").write_bytes(b"png")
             filename.write_text("![picture](sample_assets/picture.png)\n", encoding="utf-8")
 
     output = tmp_path / "sample.md"

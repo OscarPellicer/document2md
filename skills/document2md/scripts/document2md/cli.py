@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .converter import ConversionOptions, SUPPORTED_SUFFIXES, convert_files
+from .converter import OCR_MODES, ConversionOptions, SUPPORTED_SUFFIXES, convert_files
 
 
 def _configure_text_streams() -> None:
@@ -18,13 +18,13 @@ def _configure_text_streams() -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="document2md",
-        description="Convert PDF, DOCX, PPTX, and XLSX files to readable Markdown.",
+        description="Convert PDF, Office and OpenDocument files to readable Markdown.",
     )
-    parser.add_argument("inputs", nargs="+", help="PDF or Office files to convert.")
+    parser.add_argument("inputs", nargs="+", help="PDF, Office or OpenDocument files to convert.")
     parser.add_argument("-o", "--output", help="Exact .md path for one input, or an output directory.")
     parser.add_argument("--assets-dir", help="Asset directory for one input.")
     parser.add_argument("--values-only", action="store_true", help="XLSX: export cached values instead of formulas.")
-    parser.add_argument("--include-hidden", action="store_true", help="XLSX: include hidden worksheets.")
+    parser.add_argument("--include-hidden", action="store_true", help="XLSX/ODS: include hidden worksheets.")
     parser.add_argument("--include-notes", action="store_true", help="PPTX: include speaker notes.")
     parser.add_argument(
         "--images",
@@ -32,13 +32,29 @@ def build_parser() -> argparse.ArgumentParser:
         default="placeholder",
         help="Image handling: placeholders, extracted files, or PDF-only base64 embedding.",
     )
+    parser.add_argument(
+        "--ocr",
+        choices=sorted(OCR_MODES),
+        default="auto",
+        help="PDF OCR: auto (bitmap areas only), off (digital text only, much faster), or force (every page).",
+    )
     parser.add_argument("--force", action="store_true", help="Overwrite existing Markdown outputs.")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Stop at the first failing input instead of converting the rest of the batch.",
+    )
     parser.add_argument(
         "--pdf-pages-per-batch",
         type=int,
         default=10,
         metavar="N",
         help="PDF pages processed at once (default: 10; use 0 for the whole PDF).",
+    )
+    parser.add_argument(
+        "--no-bootstrap",
+        action="store_true",
+        help="Do not create or re-exec into the skill's own virtual environment.",
     )
     return parser
 
@@ -55,7 +71,7 @@ def _input_paths(raw_inputs: list[str]) -> list[Path]:
         else:
             paths.append(path)
     if not paths:
-        raise FileNotFoundError("No PDF, DOCX, PPTX, or XLSX inputs found.")
+        raise FileNotFoundError("No convertible inputs found.")
     return paths
 
 
@@ -89,13 +105,24 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             assets_dir=Path(args.assets_dir).expanduser().resolve() if args.assets_dir else None,
             pdf_pages_per_batch=args.pdf_pages_per_batch,
+            ocr=args.ocr,
         )
-        for result in convert_files(inputs, targets, options):
+        batch = convert_files(inputs, targets, options, strict=args.strict)
+        for result in batch.results:
             print(result.output_path)
             for asset in result.assets:
                 print(asset)
             for warning in result.warnings:
                 print(f"WARNING: {warning}", file=sys.stderr)
+        for failure in batch.failures:
+            print(f"ERROR: {failure.input_path}: {failure.error}", file=sys.stderr)
+        if batch.failures:
+            print(
+                f"ERROR: {len(batch.failures)} of {len(inputs)} inputs failed; "
+                f"{len(batch.results)} converted.",
+                file=sys.stderr,
+            )
+            return 1
         return 0
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
