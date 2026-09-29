@@ -1,0 +1,107 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 1
+/Kids [ 4 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+/Outlines 9 0 R
+>>
+endobj
+4 0 obj
+<<
+/Contents 5 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font 6 0 R
+/ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Parent 2 0 R
+/Annots [ 10 0 R ]
+>>
+endobj
+5 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ]
+/Length 387
+>>
+stream
+Gas2Dbu+Tt&;9L773C%^P*J?oC+1M@(?Pe?0Zuqk8LbTChVRTO-m#2T;jBrFFn[:Xb#&%S>2W!4G+kQYkSe1sSjL3O7?@:k"Z>W3o5XG-=%C2W<TXFq`RR&Xd4pq,6]u6K:["8i8ti;WEq^)Up/(Drh:RZd0\_o,JA5odN8WLm'$??#Z'caEj6_*m'ADJ.8S#aDO.&YKM8t)dS1DiZ8rT.ifP$!8Y:C7./BCQ<B+U#39#s[dG]JTc_T@F($G"qRLHPLY(Y#=7g6-ZGpRFjC>1fUCGDsPE)cr>qP&sih@rYLQK@lu/.)X_4Qe?PkQ]b@$emn5dJmT85M:RMmK/u!DKdof%gYL4A7u+;`ZlsR)nf8\l/soB'#Uqo"Qbqr*;<t/n~>
+endstream
+endobj
+6 0 obj
+<<
+/F1 7 0 R
+/F2 8 0 R
+>>
+endobj
+7 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+8 0 obj
+<<
+/BaseFont /Helvetica-Bold
+/Encoding /WinAnsiEncoding
+/Name /F2
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+9 0 obj
+<<
+>>
+endobj
+10 0 obj
+<<
+/Type /Annot
+/Subtype /Highlight
+/Rect [ 94 658 347 669 ]
+/Contents (is this seasonal pattern statistically significant\077)
+/T (Test Reviewer)
+/QuadPoints [ 94 669 347 669 94 658 347 658 ]
+/P 4 0 R
+>>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000113 00000 n 
+0000000178 00000 n 
+0000000386 00000 n 
+0000000864 00000 n 
+0000000905 00000 n 
+0000001012 00000 n 
+0000001124 00000 n 
+0000001145 00000 n 
+trailer
+<<
+/Size 11
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+1366
+%%EOF
