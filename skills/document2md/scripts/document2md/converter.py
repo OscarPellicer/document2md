@@ -527,6 +527,10 @@ def _convert_pdf_with_converter(
     output_path: Path,
     options: ConversionOptions,
 ) -> tuple[str, list[Path], list[str]]:
+    import pypdfium2 as pdfium
+
+    from . import pdf_comments
+
     page_count = _pdf_page_count(path)
     if page_count < 1:
         raise RuntimeError(f"PDF has no pages: {path}")
@@ -535,46 +539,73 @@ def _convert_pdf_with_converter(
     markdown_parts: list[str] = []
     assets: list[Path] = []
     warnings: list[str] = []
+    all_footnotes: list[tuple[int, int, dict]] = []  # (marker_number, page_number, comment)
+    marker_counter = pdf_comments.new_marker_counter()
 
-    for batch_number, page_range in enumerate(ranges, start=1):
-        conversion = converter.convert(
-            _pdf_stream(path, batch_number),
-            page_range=page_range,
-        )
-        document = conversion.document
+    try:
+        annot_doc = pdfium.PdfDocument(path)
+    except Exception:
+        # Comment extraction is best-effort: an unreadable/invalid PDF here
+        # (already validated upstream by _pdf_page_count in normal use) just
+        # means no comments get surfaced, not a conversion failure.
+        annot_doc = None
 
-        if options.images == "extract" and len(ranges) > 1:
-            assets_root = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
-            chunk_assets = assets_root / f"pages-{page_range[0]:04d}-{page_range[1]:04d}"
-            chunk_output = output_path.with_name(
-                f".{output_path.stem}.pages-{page_range[0]:04d}-{page_range[1]:04d}.md"
+    try:
+        for batch_number, page_range in enumerate(ranges, start=1):
+            conversion = converter.convert(
+                _pdf_stream(path, batch_number),
+                page_range=page_range,
             )
-            chunk_options = ConversionOptions(
-                images="extract",
-                force=True,
-                assets_dir=chunk_assets,
-                pdf_pages_per_batch=options.pdf_pages_per_batch,
-            )
-            markdown, chunk_files, chunk_warnings = _serialize_pdf_document(
-                document,
-                chunk_output,
-                chunk_options,
-                image_ref_mode,
-            )
-            chunk_output.unlink(missing_ok=True)
-        else:
-            markdown, chunk_files, chunk_warnings = _serialize_pdf_document(
-                document,
-                output_path,
-                options,
-                image_ref_mode,
-            )
+            document = conversion.document
 
-        markdown_parts.append(markdown.strip())
-        assets.extend(chunk_files)
-        warnings.extend(chunk_warnings)
+            if options.images == "extract" and len(ranges) > 1:
+                assets_root = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
+                chunk_assets = assets_root / f"pages-{page_range[0]:04d}-{page_range[1]:04d}"
+                chunk_output = output_path.with_name(
+                    f".{output_path.stem}.pages-{page_range[0]:04d}-{page_range[1]:04d}.md"
+                )
+                chunk_options = ConversionOptions(
+                    images="extract",
+                    force=True,
+                    assets_dir=chunk_assets,
+                    pdf_pages_per_batch=options.pdf_pages_per_batch,
+                )
+                markdown, chunk_files, chunk_warnings = _serialize_pdf_document(
+                    document,
+                    chunk_output,
+                    chunk_options,
+                    image_ref_mode,
+                )
+                chunk_output.unlink(missing_ok=True)
+            else:
+                markdown, chunk_files, chunk_warnings = _serialize_pdf_document(
+                    document,
+                    output_path,
+                    options,
+                    image_ref_mode,
+                )
 
-    return "\n\n".join(part for part in markdown_parts if part).rstrip() + "\n", assets, warnings
+            markdown = markdown.strip()
+            if annot_doc is not None:
+                for page_number in range(page_range[0], page_range[1] + 1):
+                    comments = pdf_comments._extract_page_comments(annot_doc[page_number - 1])
+                    if comments:
+                        markdown, footnotes = pdf_comments._insert_comment_markers(
+                            markdown, comments, marker_counter
+                        )
+                        all_footnotes.extend((n, page_number, c) for n, c in footnotes)
+
+            markdown_parts.append(markdown)
+            assets.extend(chunk_files)
+            warnings.extend(chunk_warnings)
+    finally:
+        if annot_doc is not None:
+            annot_doc.close()
+
+    markdown = "\n\n".join(part for part in markdown_parts if part).rstrip() + "\n"
+    if all_footnotes:
+        markdown = markdown.rstrip("\n") + pdf_comments.render_comments_section(all_footnotes) + "\n"
+    return markdown, assets, warnings
 
 
 def _convert_pdf(path: Path, output_path: Path, options: ConversionOptions) -> tuple[str, list[Path], list[str]]:
