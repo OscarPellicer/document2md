@@ -159,6 +159,7 @@ def test_pptx_converts_slide_text_and_table(tmp_path: Path) -> None:
     assert "# Slide 1: Overview" in markdown
     assert "Body text" in markdown
     assert "| Metric | Value |" in markdown
+    assert markdown.count("Overview") == 1
 
 
 def test_xlsx_preserves_formulas_and_sheet_boundaries(tmp_path: Path) -> None:

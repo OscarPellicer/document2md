@@ -387,7 +387,7 @@ def _convert_pptx(path: Path, output_path: Path, options: ConversionOptions) -> 
             key=lambda item: (item[1].top, item[1].left, item[0]),
         )
         for _, shape in ordered_shapes:
-            if shape is title_shape:
+            if title_shape is not None and shape.shape_id == title_shape.shape_id:
                 continue
             if shape.has_table:
                 output.extend([_pptx_table(shape.table), ""])
