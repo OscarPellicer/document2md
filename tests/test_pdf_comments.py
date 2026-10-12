@@ -131,6 +131,9 @@ def test_pdf_conversion_handles_comment_thread_end_to_end(
     output = tmp_path / "result.md"
 
     class FakeDocument:
+        def iterate_items(self):
+            return iter(())
+
         def export_to_markdown(self, *, image_mode):
             return (
                 "Sample Report\n\n"
@@ -206,6 +209,9 @@ def test_pdf_conversion_inserts_comment_markers_without_real_docling(
     output = tmp_path / "result.md"
 
     class FakeDocument:
+        def iterate_items(self):
+            return iter(())
+
         def export_to_markdown(self, *, image_mode):
             return (
                 "This document exists only to exercise the PDF comment extraction feature.\n\n"
@@ -248,6 +254,9 @@ def test_pdf_conversion_without_comments_is_unaffected(tmp_path: Path, monkeypat
     output = tmp_path / "plain.md"
 
     class FakeDocument:
+        def iterate_items(self):
+            return iter(())
+
         def export_to_markdown(self, *, image_mode):
             return "Just some plain markdown."
 

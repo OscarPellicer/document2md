@@ -8,7 +8,10 @@
 - PDFs are processed in ordered page ranges (10 pages by default) and the Markdown fragments are joined in source order. This bounds peak memory use for long PDFs.
 - Docling OCR, layout, and table stages use conservative batch and queue sizes to reduce memory spikes.
 - When the Tesseract executable is available, use Docling's Tesseract CLI OCR backend; otherwise use RapidOCR with the bundled ONNX Runtime backend.
-- Docling reconstructs reading order, headings, lists, tables, formulas, and OCR text where available.
+- Docling reconstructs reading order, headings, lists, tables, and OCR text where available.
+- Docling's parser can drop the spaces between words on tightly set fonts. After conversion, each text block (paragraphs, headings, list items, captions; never table cells) is re-read from the same bounding box with PDFium, and the PDFium reading replaces Docling's only when both contain exactly the same letters and digits. That repair can change spacing, dashes, quotes and list-marker placement, never words. Line-end hyphens are kept between capitals or digits (`FUSAR-KLIP`) and removed elsewhere.
+- Equations are emitted as `<!-- formula-not-decoded -->` unless `--formulas` is passed, which runs Docling's formula model and writes LaTeX. The model is slow on CPU (minutes per page) and can pull neighbouring text into an equation.
+- Extracted and embedded pictures are rendered at 2x (144 dpi).
 - `--images placeholder` keeps lightweight image-position markers.
 - `--images extract` asks Docling to write referenced image artifacts to the accompanying assets folder.
 - Extracted image links are relative to the Markdown file. Docling emits absolute, percent-encoded URIs when handed an absolute artifacts directory, so the converter passes a relative one and rewrites any absolute link that remains.
@@ -19,6 +22,20 @@
 - `--images embed` writes base64 images into Markdown and can make the file very large.
 - PDF extraction is computationally heavier than Office extraction and may download model files on first use.
 - `--pdf-pages-per-batch 0` disables page batching. Smaller positive values trade speed for lower peak memory.
+
+## PDF with Chandra (`--pdf-backend chandra`)
+
+- Opt-in. Docling stays the default PDF backend.
+- `chandra-ocr` is an optional dependency (`scripts/requirements-chandra.txt`). The entry point installs it into the skill's `.venv` the first time the backend is requested; with `--no-bootstrap`, or outside the skill environment, a missing install fails each PDF with an install hint.
+- Each page is rendered with PDFium at 192 dpi (at least 1024 px on the short side) and transcribed by `datalab-to/chandra-ocr-2` into layout blocks with labels (text, section header, table, caption, equation, figure, page header/footer...). The text layer is never read, so `--ocr` and `--formulas` have no effect.
+- Inference runs locally with transformers (CUDA, MPS or CPU; bf16 weights, about 10.6 GB download, about 11 GB of memory), or on an OpenAI-compatible server given by `--chandra-server` or `DOCUMENT2MD_CHANDRA_SERVER`. Pages are sent one at a time, so one failed page is marked `<!-- page N: not transcribed -->`, reported as a warning, and does not stop the document.
+- Page headers, page footers and blank pages are dropped. The model decides what counts as a header, so a running header can survive on some pages.
+- Headings, lists, bold/italic, `<sup>`/`<sub>` and links come from the model's HTML through the same Markdown conversion Chandra uses. Inline math becomes `$...$`, display math `$$...$$`.
+- HTML tables are laid out on their grid as Markdown tables. A spanned cell's text appears once and the other covered positions stay blank, as for Word tables.
+- For Image, Figure and Diagram blocks only the crop of the rendered page is kept, written as `page-NNNN-image-K.png` in the assets folder (`--images extract`), inlined as PNG (`--images embed`), or replaced by `<!-- image -->`. The model's alt text, figure descriptions, chart data and mermaid diagrams are dropped, because they are generated, not transcribed.
+- A bullet glyph or number the model repeats inside a list item (`- • item`, `1. 1. item`) is removed.
+- The model can substitute plausible words for what is printed: misspellings get "corrected", rare names normalised, and characters inside dense lists of identifiers swapped. In testing, 5 gene symbols on one page of comma-separated gene lists came out wrong at both bf16 and 8-bit. A page that ends in a repetition loop is reported as a warning.
+- Code is Apache-2.0; the weights use a modified OpenRAIL-M licence (free for research, personal use, and organisations under $2M funding/revenue; not for use competing with Datalab's API).
 
 ## DOCX
 

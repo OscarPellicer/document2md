@@ -1,0 +1,5 @@
+# Optional: the Chandra PDF backend (--pdf-backend chandra). Installed into
+# the skill's .venv on first use. torch and transformers already come with
+# Docling, so this adds about 15 MB; the model weights (about 10.6 GB,
+# datalab-to/chandra-ocr-2) download from Hugging Face on the first local run.
+chandra-ocr[hf]>=0.2

@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3"]
+chandra = ["chandra-ocr[hf]>=0.2"]
 
 [project.scripts]
 document2md = "document2md.cli:main"

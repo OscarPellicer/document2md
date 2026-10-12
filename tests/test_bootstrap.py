@@ -43,7 +43,7 @@ def test_first_run_creates_the_environment_then_re_executes(entry_point, monkeyp
     monkeypatch.setattr(
         entry_point.subprocess,
         "run",
-        lambda command, env=None: launched.append((command, env)) or subprocess.CompletedProcess(command, 0),
+        lambda command, env=None, **kwargs: launched.append((command, env)) or subprocess.CompletedProcess(command, 0),
     )
     monkeypatch.setattr(sys, "argv", ["convert_document.py", "file.pdf"])
     monkeypatch.delenv(entry_point.GUARD, raising=False)
@@ -74,7 +74,7 @@ def test_an_existing_environment_is_reused_without_reinstalling(entry_point, mon
     monkeypatch.setattr(
         entry_point.subprocess,
         "run",
-        lambda command, env=None: subprocess.CompletedProcess(command, 3),
+        lambda command, env=None, **kwargs: subprocess.CompletedProcess(command, 3),
     )
     monkeypatch.setattr(sys, "argv", ["convert_document.py", "file.pdf"])
     monkeypatch.delenv(entry_point.GUARD, raising=False)
@@ -110,3 +110,72 @@ def test_no_bootstrap_flag_keeps_the_current_interpreter(entry_point, monkeypatc
 
     with pytest.raises(SystemExit):
         entry_point.main()
+
+
+def test_an_environment_built_with_an_old_python_is_rebuilt(entry_point, monkeypatch, tmp_path) -> None:
+    venv_dir = tmp_path / ".venv"
+    interpreter = entry_point._venv_python(venv_dir)
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text("#!/bin/sh\n")
+    created = []
+
+    def create() -> None:
+        assert not venv_dir.exists(), "the stale environment must be removed first"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.write_text("#!/bin/sh\n")
+        created.append(True)
+
+    monkeypatch.setattr(entry_point, "VENV_DIR", venv_dir)
+    monkeypatch.setattr(entry_point, "_python_version", lambda path: (3, 9))
+    monkeypatch.setattr(entry_point, "_create_environment", create)
+    monkeypatch.setattr(entry_point, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+    monkeypatch.setattr(
+        entry_point.subprocess,
+        "run",
+        lambda command, env=None, **kwargs: subprocess.CompletedProcess(command, 0),
+    )
+
+    with pytest.raises(SystemExit):
+        entry_point._bootstrap(["file.pdf"])
+    assert created == [True]
+
+
+def test_an_environment_whose_version_cannot_be_read_is_kept(entry_point, monkeypatch, tmp_path) -> None:
+    venv_dir = tmp_path / ".venv"
+    interpreter = entry_point._venv_python(venv_dir)
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text("#!/bin/sh\n")
+
+    def fail() -> None:
+        raise AssertionError("an environment must not be deleted on an unreadable version")
+
+    monkeypatch.setattr(entry_point, "VENV_DIR", venv_dir)
+    monkeypatch.setattr(entry_point, "_python_version", lambda path: None)
+    monkeypatch.setattr(entry_point, "_create_environment", fail)
+    monkeypatch.setattr(entry_point, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+    monkeypatch.setattr(
+        entry_point.subprocess,
+        "run",
+        lambda command, env=None, **kwargs: subprocess.CompletedProcess(command, 0),
+    )
+
+    with pytest.raises(SystemExit):
+        entry_point._bootstrap(["file.pdf"])
+    assert interpreter.exists()
+
+
+def test_an_old_interpreter_looks_for_a_newer_python_on_path(entry_point, monkeypatch) -> None:
+    versions = {"/opt/py39": (3, 9), "/opt/py312": (3, 12)}
+    on_path = {"python3.12": "/opt/py312", "python3": "/opt/py39"}
+
+    monkeypatch.setattr(sys, "version_info", (3, 9, 6, "final", 0))
+    monkeypatch.setattr(entry_point.shutil, "which", lambda name: on_path.get(name))
+    monkeypatch.setattr(entry_point, "_python_version", lambda path: versions.get(path))
+
+    assert entry_point._find_base_python() == "/opt/py312"
+    assert entry_point._dependencies_available() is False
+
+
+def test_a_new_enough_interpreter_builds_the_environment_itself(entry_point, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "version_info", (3, 12, 0, "final", 0))
+    assert entry_point._find_base_python() == sys.executable
