@@ -23,6 +23,7 @@ OFFICE_SUFFIXES = {".docx", ".pptx", ".xlsx"}
 OPENDOCUMENT_SUFFIXES = {".odt", ".ods", ".odp"}
 SUPPORTED_SUFFIXES = {".pdf"} | OFFICE_SUFFIXES | OPENDOCUMENT_SUFFIXES
 OCR_MODES = {"auto", "off", "force"}
+PDF_BACKENDS = {"docling", "chandra"}
 # Rendering scale for extracted or embedded PDF pictures (1.0 is 72 dpi).
 PDF_IMAGE_SCALE = 2.0
 
@@ -38,6 +39,9 @@ class ConversionOptions:
     pdf_pages_per_batch: int = 10
     ocr: str = "auto"
     formulas: bool = False
+    pdf_backend: str = "docling"
+    chandra_server: str | None = None
+    chandra_model: str | None = None
 
 
 @dataclass(slots=True)
@@ -663,9 +667,49 @@ def _convert_pdf_with_converter(
     return "\n\n".join(part for part in markdown_parts if part).rstrip() + "\n", assets, warnings
 
 
+def _create_pdf_engine(options: ConversionOptions):
+    """Return the loaded PDF backend, shared by every PDF in a batch."""
+    if options.pdf_backend == "chandra":
+        from . import chandra_backend
+
+        return chandra_backend.create_engine(options.chandra_server, options.chandra_model), None
+    return _create_pdf_converter(options)
+
+
+def _convert_pdf_with_chandra(
+    engine,
+    path: Path,
+    output_path: Path,
+    options: ConversionOptions,
+) -> tuple[str, list[Path], list[str]]:
+    from . import chandra_backend
+
+    page_count = _pdf_page_count(path)
+    if page_count < 1:
+        raise RuntimeError(f"PDF has no pages: {path}")
+    assets_dir = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")
+    markdown, assets, warnings = chandra_backend.convert_pdf(
+        engine,
+        path,
+        output_path,
+        options.images,
+        assets_dir,
+        _pdf_page_ranges(page_count, options.pdf_pages_per_batch),
+    )
+    if options.ocr == "off":
+        warnings.insert(0, "--ocr off has no effect with the Chandra backend, which reads every page as an image.")
+    return markdown, assets, warnings
+
+
+def _convert_pdf_with_engine(engine, extra, path: Path, output_path: Path, options: ConversionOptions):
+    if options.pdf_backend == "chandra":
+        return _convert_pdf_with_chandra(engine, path, output_path, options)
+    return _convert_pdf_with_converter(engine, extra, path, output_path, options)
+
+
 def _convert_pdf(path: Path, output_path: Path, options: ConversionOptions) -> tuple[str, list[Path], list[str]]:
-    converter, image_ref_mode = _create_pdf_converter(options)
-    return _convert_pdf_with_converter(converter, image_ref_mode, path, output_path, options)
+    engine, extra = _create_pdf_engine(options)
+    return _convert_pdf_with_engine(engine, extra, path, output_path, options)
 
 
 def _convert_opendocument(path: Path, output_path: Path, options: ConversionOptions) -> tuple[str, list[Path], list[str]]:
@@ -739,6 +783,8 @@ def convert_file(input_path: str | Path, output_path: str | Path | None = None, 
         raise ValueError("pdf_pages_per_batch must be zero or a positive integer.")
     if options.ocr not in OCR_MODES:
         raise ValueError("ocr must be one of: auto, off, force.")
+    if options.pdf_backend not in PDF_BACKENDS:
+        raise ValueError("pdf_backend must be one of: docling, chandra.")
 
     requested = Path(output_path).expanduser() if output_path else source.with_suffix(".md")
     target = _unique_path(requested.resolve(), options.force)
@@ -768,7 +814,7 @@ def convert_files(
     options: ConversionOptions | None = None,
     strict: bool = False,
 ) -> BatchResult:
-    """Convert several files, reusing one Docling converter for all PDFs.
+    """Convert several files, reusing one PDF backend (Docling or Chandra) for all PDFs.
 
     A file that fails is recorded and the rest of the batch still runs, so one
     unreadable input cannot discard the work already queued behind it. Pass
@@ -798,7 +844,9 @@ def convert_files(
 
     if pdf_jobs:
         try:
-            converter, image_ref_mode = _create_pdf_converter(options)
+            if options.pdf_backend not in PDF_BACKENDS:
+                raise ValueError("pdf_backend must be one of: docling, chandra.")
+            converter, image_ref_mode = _create_pdf_engine(options)
         except Exception as error:
             if strict:
                 raise
@@ -807,7 +855,7 @@ def convert_files(
             pdf_jobs = []
         for index, source, target in pdf_jobs:
             try:
-                markdown, assets, warnings = _convert_pdf_with_converter(
+                markdown, assets, warnings = _convert_pdf_with_engine(
                     converter,
                     image_ref_mode,
                     source,
@@ -817,10 +865,11 @@ def convert_files(
                 target.write_text(markdown, encoding="utf-8", newline="\n")
                 results[index] = ConversionResult(source, target, assets, warnings)
             except Exception as error:
+                backend = options.pdf_backend.capitalize()
                 if strict:
-                    raise RuntimeError(f"Docling PDF conversion failed for {source}: {error}") from error
+                    raise RuntimeError(f"{backend} PDF conversion failed for {source}: {error}") from error
                 failures.append(
-                    ConversionFailure(source, RuntimeError(f"Docling PDF conversion failed: {error}"))
+                    ConversionFailure(source, RuntimeError(f"{backend} PDF conversion failed: {error}"))
                 )
 
     return BatchResult([result for result in results if result is not None], failures)

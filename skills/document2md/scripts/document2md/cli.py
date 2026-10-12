@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .converter import OCR_MODES, ConversionOptions, SUPPORTED_SUFFIXES, convert_files
+from .converter import OCR_MODES, PDF_BACKENDS, ConversionOptions, SUPPORTED_SUFFIXES, convert_files
 
 
 def _configure_text_streams() -> None:
@@ -42,6 +42,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--formulas",
         action="store_true",
         help="PDF: decode equations to LaTeX with Docling's formula model (slow on CPU, minutes per page).",
+    )
+    parser.add_argument(
+        "--pdf-backend",
+        choices=sorted(PDF_BACKENDS),
+        default="docling",
+        help="PDF engine: docling (default; fast layout pipeline) or chandra "
+        "(vision-language OCR model; slower, better on scans, equations and figures).",
+    )
+    parser.add_argument(
+        "--chandra-server",
+        metavar="URL",
+        help="Chandra: OpenAI-compatible server hosting the model (vLLM, mlx_vlm.server), "
+        "e.g. http://localhost:8080/v1. Default: $DOCUMENT2MD_CHANDRA_SERVER, else run locally.",
+    )
+    parser.add_argument(
+        "--chandra-model",
+        metavar="NAME",
+        help="Chandra: served model name, or local checkpoint (default: datalab-to/chandra-ocr-2).",
     )
     parser.add_argument("--force", action="store_true", help="Overwrite existing Markdown outputs.")
     parser.add_argument(
@@ -112,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
             pdf_pages_per_batch=args.pdf_pages_per_batch,
             ocr=args.ocr,
             formulas=args.formulas,
+            pdf_backend=args.pdf_backend,
+            chandra_server=args.chandra_server,
+            chandra_model=args.chandra_model,
         )
         batch = convert_files(inputs, targets, options, strict=args.strict)
         for result in batch.results:

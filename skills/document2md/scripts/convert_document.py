@@ -6,6 +6,10 @@ On first use this creates a virtual environment inside the skill folder
 with that interpreter. Every later run finds the same environment and starts
 straight away, so callers never have to locate or activate it. Pass
 ``--no-bootstrap`` to stay in the current interpreter.
+
+The optional Chandra PDF backend (``--pdf-backend chandra``) is installed into
+that same environment the first time it is requested, so the default install
+does not carry it.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPTS_DIR.parent
 VENV_DIR = SKILL_DIR / ".venv"
 REQUIREMENTS = SCRIPTS_DIR / "requirements.txt"
+CHANDRA_REQUIREMENTS = SCRIPTS_DIR / "requirements-chandra.txt"
 GUARD = "DOCUMENT2MD_BOOTSTRAPPED"
 REQUIRED_MODULES = ("docx", "pptx", "openpyxl", "docling", "pypdfium2")
 MIN_PYTHON = (3, 11)
@@ -127,6 +132,42 @@ def _bootstrap(argv: list[str]) -> None:
     _exit(completed.returncode)
 
 
+def _wants_chandra(argv: list[str]) -> bool:
+    for index, arg in enumerate(argv):
+        if arg == "--pdf-backend=chandra":
+            return True
+        if arg == "--pdf-backend" and argv[index + 1:index + 2] == ["chandra"]:
+            return True
+    return False
+
+
+def _in_skill_environment() -> bool:
+    try:
+        return Path(sys.prefix).resolve() == VENV_DIR.resolve()
+    except OSError:
+        return False
+
+
+def _ensure_chandra(argv: list[str]) -> None:
+    """Install the optional Chandra backend into the skill environment on first use."""
+    from importlib.util import find_spec
+
+    if "--no-bootstrap" in argv or not _wants_chandra(argv):
+        return
+    if find_spec("chandra") is not None or not _in_skill_environment():
+        return
+    print("document2md: installing the Chandra PDF backend (first use only)...", file=sys.stderr)
+    completed = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "-r", str(CHANDRA_REQUIREMENTS)]
+    )
+    if completed.returncode != 0:
+        print(
+            f"ERROR: could not install {CHANDRA_REQUIREMENTS} into {VENV_DIR}.",
+            file=sys.stderr,
+        )
+        _exit(2)
+
+
 def _exit(code: int) -> None:
     """Leave immediately, after flushing.
 
@@ -153,6 +194,7 @@ def main() -> None:
         )
         _exit(2)
 
+    _ensure_chandra(argv)
     sys.path.insert(0, str(SCRIPTS_DIR))
     from document2md.cli import main as cli_main
 
