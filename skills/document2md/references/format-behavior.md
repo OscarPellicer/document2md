@@ -8,7 +8,10 @@
 - PDFs are processed in ordered page ranges (10 pages by default) and the Markdown fragments are joined in source order. This bounds peak memory use for long PDFs.
 - Docling OCR, layout, and table stages use conservative batch and queue sizes to reduce memory spikes.
 - When the Tesseract executable is available, use Docling's Tesseract CLI OCR backend; otherwise use RapidOCR with the bundled ONNX Runtime backend.
-- Docling reconstructs reading order, headings, lists, tables, formulas, and OCR text where available.
+- Docling reconstructs reading order, headings, lists, tables, and OCR text where available.
+- Docling's parser can drop the spaces between words on tightly set fonts. After conversion, each text block (paragraphs, headings, list items, captions; never table cells) is re-read from the same bounding box with PDFium, and the PDFium reading replaces Docling's only when both contain exactly the same letters and digits. That repair can change spacing, dashes, quotes and list-marker placement, never words. Line-end hyphens are kept between capitals or digits (`FUSAR-KLIP`) and removed elsewhere.
+- Equations are emitted as `<!-- formula-not-decoded -->` unless `--formulas` is passed, which runs Docling's formula model and writes LaTeX. The model is slow on CPU (minutes per page) and can pull neighbouring text into an equation.
+- Extracted and embedded pictures are rendered at 2x (144 dpi).
 - `--images placeholder` keeps lightweight image-position markers.
 - `--images extract` asks Docling to write referenced image artifacts to the accompanying assets folder.
 - Extracted image links are relative to the Markdown file. Docling emits absolute, percent-encoded URIs when handed an absolute artifacts directory, so the converter passes a relative one and rewrites any absolute link that remains.

@@ -247,3 +247,22 @@ def _is_full_page(ocr_options) -> bool:
     if mode is not None:
         return str(getattr(mode, "value", mode)) == "full_page"
     return bool(getattr(ocr_options, "force_full_page_ocr", False))
+
+
+def test_pdf_text_is_respaced_only_when_letters_and_digits_match() -> None:
+    respaced = converter_module._respaced_text
+
+    assert respaced("RESPONSETOREVIEWER1(R1)", "RESPONSE TO REVIEWER 1 (R1)") == "RESPONSE TO REVIEWER 1 (R1)"
+    # Docling keeps list enumerators out of the item text.
+    assert respaced("Weclarifiedtherelationship", "1) We clarified the relationship") == "We clarified the relationship"
+    assert respaced("FUSAR-GEOVL-1MDataset:", "• FUSAR-GEOVL-1M Dataset:") == "FUSAR-GEOVL-1M Dataset:"
+    assert respaced("F.Liu,D.Chen,'Remoteclip'", "[5] F. Liu, D. Chen, \u201cRemoteclip\u201d") == "F. Liu, D. Chen, \u201cRemoteclip\u201d"
+    # Any change beyond spacing and punctuation keeps Docling's reading.
+    assert respaced("accuracy of 80%", "accuracy of 90%") is None
+    assert respaced("Top-1 accuracy", "Top-1 accuracy (%) 75.4") is None
+    assert respaced("", "IoU(A, B) = |A ∩ B|") is None
+    assert respaced("already spaced text", "already spaced text") is None
+
+
+def test_pdf_text_repair_ignores_sources_pdfium_cannot_open() -> None:
+    assert converter_module._repair_pdf_text_spacing(SimpleNamespace(), b"%PDF-test") == 0

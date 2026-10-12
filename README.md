@@ -26,6 +26,7 @@ document2md document.pdf --images extract
 document2md scanned.pdf --ocr force
 document2md born-digital.pdf --ocr off
 document2md long-document.pdf --pdf-pages-per-batch 5
+document2md paper.pdf --formulas
 document2md document.docx
 document2md deck.pptx workbook.xlsx --output converted
 document2md workbook.xlsx --values-only --force
@@ -37,6 +38,8 @@ The CLI writes one Markdown file per input. For a single input, `--output` may b
 A file that cannot be converted is reported on stderr and the batch continues; the exit code is `1` when any input failed, `2` when the whole invocation was rejected. Use `--strict` to stop at the first failure instead.
 
 `--ocr` controls the PDF OCR stage: `auto` (default) runs OCR on bitmap areas, `off` skips it entirely and is much faster on born-digital PDFs, and `force` OCRs every page, which is what scans need.
+
+`--formulas` decodes PDF equations to LaTeX with Docling's formula model. It is off by default because it takes minutes per page on CPU.
 
 PDF inputs are passed to Docling through an ASCII-named memory stream, so paths containing spaces, accents, or other Unicode characters are supported. Long PDFs are processed in ordered 10-page ranges by default to limit peak memory use. Use `--pdf-pages-per-batch 5` (or `1`) on a constrained machine, and `--pdf-pages-per-batch 0` to disable batching.
 

@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="PDF OCR: auto (bitmap areas only), off (digital text only, much faster), or force (every page).",
     )
+    parser.add_argument(
+        "--formulas",
+        action="store_true",
+        help="PDF: decode equations to LaTeX with Docling's formula model (slow on CPU, minutes per page).",
+    )
     parser.add_argument("--force", action="store_true", help="Overwrite existing Markdown outputs.")
     parser.add_argument(
         "--strict",
@@ -106,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             assets_dir=Path(args.assets_dir).expanduser().resolve() if args.assets_dir else None,
             pdf_pages_per_batch=args.pdf_pages_per_batch,
             ocr=args.ocr,
+            formulas=args.formulas,
         )
         batch = convert_files(inputs, targets, options, strict=args.strict)
         for result in batch.results:

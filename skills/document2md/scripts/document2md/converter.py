@@ -23,6 +23,8 @@ OFFICE_SUFFIXES = {".docx", ".pptx", ".xlsx"}
 OPENDOCUMENT_SUFFIXES = {".odt", ".ods", ".odp"}
 SUPPORTED_SUFFIXES = {".pdf"} | OFFICE_SUFFIXES | OPENDOCUMENT_SUFFIXES
 OCR_MODES = {"auto", "off", "force"}
+# Rendering scale for extracted or embedded PDF pictures (1.0 is 72 dpi).
+PDF_IMAGE_SCALE = 2.0
 
 
 @dataclass(slots=True)
@@ -35,6 +37,7 @@ class ConversionOptions:
     assets_dir: Path | None = None
     pdf_pages_per_batch: int = 10
     ocr: str = "auto"
+    formulas: bool = False
 
 
 @dataclass(slots=True)
@@ -445,6 +448,8 @@ def _create_pdf_converter(options: ConversionOptions):
             ocr_options.force_full_page_ocr = True
     pipeline_options = PdfPipelineOptions(
         generate_picture_images=options.images in {"extract", "embed"},
+        images_scale=PDF_IMAGE_SCALE,
+        do_formula_enrichment=options.formulas,
         do_ocr=options.ocr != "off",
         ocr_options=ocr_options,
         ocr_batch_size=1,
@@ -482,6 +487,85 @@ def _pdf_stream(path: Path, batch_number: int = 0):
 
     name = f"document-{batch_number:04d}.pdf" if batch_number else "document.pdf"
     return DocumentStream(name=name, stream=BytesIO(path.read_bytes()))
+
+
+_LIST_MARKER = re.compile(r"^(?:[\u2022\u00b7\u25aa\u2013*-]|\(?\d{1,3}[.)]|\(?[a-zA-Z][.)]|\[\d{1,4}\])\s+")
+
+
+def _letters_and_digits(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text).casefold()
+
+
+def _pdfium_region_text(page, bbox) -> str:
+    """Read the text inside one Docling bounding box with PDFium's word spacing."""
+    from docling_core.types.doc import CoordOrigin
+
+    if bbox.coord_origin != CoordOrigin.BOTTOMLEFT:
+        bbox = bbox.to_bottom_left_origin(page.get_height())
+    textpage = page.get_textpage()
+    try:
+        raw = textpage.get_text_bounded(
+            left=bbox.l - 1, bottom=bbox.b - 1, right=bbox.r + 1, top=bbox.t + 1
+        )
+    finally:
+        textpage.close()
+    # PDFium reports a line-end hyphen as U+FFFE or U+0002. Keep it between
+    # capitals or digits (FUSAR-KLIP, GPT-4) and drop it inside ordinary words.
+    raw = re.sub(r"(?<=[A-Z0-9])[\ufffe\x02]|[\ufffe\x02](?=[A-Z0-9])", "-", raw)
+    raw = re.sub(r"[\ufffe\x02]", "", raw)
+    return " ".join(line.strip() for line in re.split(r"[\r\n]+", raw) if line.strip())
+
+
+def _respaced_text(original: str, candidate: str) -> str | None:
+    """Return the PDFium reading when it differs from Docling's only in spacing and punctuation."""
+    key = _letters_and_digits(original)
+    if not key:
+        return None
+    marker = _LIST_MARKER.match(candidate)
+    if marker and not _LIST_MARKER.match(original):
+        # Docling stores list enumerators separately from the item text.
+        candidate = candidate[marker.end():]
+    if candidate == original or _letters_and_digits(candidate) != key:
+        return None
+    if candidate.count(" ") < original.count(" "):
+        return None
+    return candidate
+
+
+def _repair_pdf_text_spacing(document, source: bytes) -> int:
+    """Restore word spaces that Docling's parser drops on tightly set fonts.
+
+    Only text blocks are touched, never table cells, and a block is replaced
+    only when both readings contain exactly the same letters and digits.
+    """
+    try:
+        import pypdfium2 as pdfium
+        from docling_core.types.doc import TextItem
+    except ImportError:
+        return 0
+
+    try:
+        pdf = pdfium.PdfDocument(source)
+    except pdfium.PdfiumError:
+        return 0
+    repaired = 0
+    try:
+        for item, _level in document.iterate_items():
+            if not isinstance(item, TextItem) or not item.prov:
+                continue
+            try:
+                candidate = " ".join(
+                    _pdfium_region_text(pdf[prov.page_no - 1], prov.bbox) for prov in item.prov
+                ).strip()
+            except (IndexError, ValueError):
+                continue
+            respaced = _respaced_text(item.text, candidate)
+            if respaced is not None:
+                item.text = respaced
+                repaired += 1
+    finally:
+        pdf.close()
+    return repaired
 
 
 def _pdf_page_ranges(page_count: int, pages_per_batch: int) -> list[tuple[int, int]]:
@@ -532,6 +616,7 @@ def _convert_pdf_with_converter(
         raise RuntimeError(f"PDF has no pages: {path}")
 
     ranges = _pdf_page_ranges(page_count, options.pdf_pages_per_batch)
+    source = path.read_bytes()
     markdown_parts: list[str] = []
     assets: list[Path] = []
     warnings: list[str] = []
@@ -542,6 +627,7 @@ def _convert_pdf_with_converter(
             page_range=page_range,
         )
         document = conversion.document
+        _repair_pdf_text_spacing(document, source)
 
         if options.images == "extract" and len(ranges) > 1:
             assets_root = options.assets_dir or output_path.with_name(f"{output_path.stem}_assets")

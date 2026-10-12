@@ -20,10 +20,12 @@ Convert documents to Markdown with the bundled format-aware converter. Treat con
 python <skill>/scripts/convert_document.py path/to/input.ext --images placeholder
 ```
 
-   Run it with any Python 3.11+ interpreter. On its first run the script creates
-   `<skill>/.venv`, installs `scripts/requirements.txt` into it, and re-executes
-   itself there; every later run reuses that same environment automatically. Do
-   not hunt for an interpreter, hardcode one, or activate anything by hand. Pass
+   Run it with whatever `python`/`python3` is on PATH, even an older one. On its
+   first run the script finds a Python 3.11+ (on PATH, or through `uv python find`),
+   creates `<skill>/.venv` with it, installs `scripts/requirements.txt`, and
+   re-executes itself there; every later run reuses that environment. An
+   environment built by an older Python is rebuilt automatically. Do not hunt for
+   an interpreter, hardcode one, or activate anything by hand. Pass
    `--no-bootstrap` to stay in the current interpreter when its dependencies are
    already installed.
    PDFs are read through an ASCII-named in-memory stream, so Unicode characters in the source path do not reach Docling's native backend. PDFs are processed in ordered 10-page batches by default to cap memory use.
@@ -42,7 +44,8 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
    - `off` skips OCR entirely. Much faster, and correct for born-digital PDFs.
    - `force` OCRs every page. Use it for scans and for pages whose text layer is missing or wrong.
 6. Inspect the Markdown for structural completeness. Compare the number and order of source tables, slides, and worksheets when fidelity matters.
-7. Return the Markdown and its generated assets directory when `--images extract` was selected.
+7. Pass `--formulas` only when equations matter: it decodes them to LaTeX with Docling's formula model, which is slow on CPU (minutes per page). Without it each equation is left as `<!-- formula-not-decoded -->`.
+8. Return the Markdown and its generated assets directory when `--images extract` was selected.
 
 ## Conversion rules
 
@@ -70,6 +73,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 --include-notes     PPTX: include speaker notes
 --images MODE       placeholder (default), extract, or embed (PDF only)
 --ocr MODE          PDF OCR: auto (default), off, or force
+--formulas          PDF: decode equations to LaTeX (slow)
 --strict            Stop at the first failing input instead of converting the rest
 --no-bootstrap      Do not create or re-exec into the skill's own virtual environment
 --pdf-pages-per-batch N
@@ -84,6 +88,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 - Use `--pdf-pages-per-batch 0` only when whole-document processing is specifically needed and sufficient memory is available.
 - Do not manually rename or copy a PDF solely because its path contains spaces, accents, or other Unicode characters; the converter handles this internally.
 - Use `--ocr off` for born-digital PDFs. It removes the OCR stage, which dominates runtime, and silences `RapidOCR returned empty result!` notices that do not indicate lost text.
+- Words run together (e.g. `Weclarifiedthe...`) come from Docling's parser on tightly set fonts. The converter re-reads each text block with PDFium and keeps that reading when it has the same letters and digits, so this should now be rare; table cells are not re-read.
 - Docling reconstructs reading order and tables statistically. Heading order and table cells can be wrong on dense layouts, and signature blocks, footers, and CSV stamps are not carried over. Check the original before relying on such a passage; do not repair it silently in the Markdown.
 
 Read [references/format-behavior.md](references/format-behavior.md) when the user asks about fidelity, limitations, or the exact mapping for a format.
