@@ -35,7 +35,7 @@ def _blank_pdf(path: Path, pages: int = 2) -> Path:
 
 
 class FakeManager:
-    """Return one canned Chandra result per page, with one figure on page 1."""
+    """Return one canned page of Chandra layout HTML per call."""
 
     def __init__(self, fail_pages: set[int] = frozenset()):
         self.calls = 0
@@ -45,14 +45,20 @@ class FakeManager:
         self.calls += 1
         page = self.calls
         if page in self.fail_pages:
-            return [SimpleNamespace(raw="", markdown="", images={}, error=True)]
-        figure = Image.new("RGB", (10, 10), "red")
-        markdown = (
-            f"# Page {page}\n\nText with a citation<sup>1,2</sup> and $x^2$.\n\n"
-            "![Bar chart of survival](abc_1_img.webp)\n\n"
-            "<table><tr><th>A</th><th>B</th></tr><tr><td colspan=\"2\">wide</td></tr></table>"
+            return [SimpleNamespace(raw="", error=True)]
+        raw = (
+            f'<div data-bbox="0 0 1000 80" data-label="Page-Header">Journal header {page}</div>'
+            f'<div data-bbox="0 100 1000 150" data-label="Section-Header"><h1>Page {page}</h1></div>'
+            '<div data-bbox="0 150 1000 250" data-label="Text">Text with a citation<sup>1,2</sup> '
+            'and <math>x^2</math>.</div>'
+            '<div data-bbox="100 250 500 500" data-label="Figure"><img alt="Bar chart of survival"/>'
+            '<p>Survival is 80% in arm A.</p></div>'
+            '<div data-bbox="0 500 1000 600" data-label="Table"><table><tr><th>A</th><th>B</th></tr>'
+            '<tr><td colspan="2">wide</td></tr></table></div>'
+            '<div data-bbox="0 600 1000 700" data-label="List-Group"><ul><li>\u2022 first</li></ul><ol><li>1. one</li></ol></div>'
+            f'<div data-bbox="0 950 1000 1000" data-label="Page-Footer">Page {page} of 9</div>'
         )
-        return [SimpleNamespace(raw="<div>ok</div>", markdown=markdown, images={"abc_1_img.webp": figure}, error=False)]
+        return [SimpleNamespace(raw=raw, error=False)]
 
 
 def _engine(manager=None):
@@ -90,6 +96,11 @@ def test_extracted_figures_are_written_and_linked_relatively(tmp_path: Path, mon
     text = result.output_path.read_text(encoding="utf-8")
     assert "<sup>1,2</sup>" in text and "$x^2$" in text
     assert "| A | B |" in text and "<table" not in text
+    assert "- first" in text and "\u2022" not in text
+    assert "1. one" in text and "1. 1." not in text
+    # Chandra's own description of a figure, and page furniture, are not source text.
+    assert "Survival is 80%" not in text and "Bar chart" not in text
+    assert "Journal header" not in text and "of 9" not in text
     assert [path.name for path in result.assets] == ["page-0001-image-1.png", "page-0002-image-1.png"]
     for line in text.splitlines():
         if line.startswith("!["):
@@ -103,7 +114,6 @@ def test_placeholder_mode_writes_no_assets(tmp_path: Path, monkeypatch) -> None:
     text = result.output_path.read_text(encoding="utf-8")
     assert result.assets == []
     assert text.count("<!-- image -->") == 2
-    assert "abc_1_img" not in text
 
 
 def test_embed_mode_inlines_png_data(tmp_path: Path, monkeypatch) -> None:

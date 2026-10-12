@@ -34,7 +34,10 @@ INSTALL_HINT = (
 IMAGE_DPI = 192
 MIN_PAGE_PIXELS = 1024
 IMAGE_PLACEHOLDER = "<!-- image -->"
-_MARKDOWN_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+PICTURE_LABELS = {"Image", "Figure", "Diagram"}
+SKIPPED_LABELS = {"Blank-Page", "Page-Header", "Page-Footer"}
+_DOUBLED_BULLET = re.compile(r"^(\s*[-*+] )[\u2022\u00b7\u25aa\u25cf\u25e6\u2023\u2013]\s*", re.M)
+_DOUBLED_NUMBER = re.compile(r"^(\s*)(\d{1,3})\. \2[.)]\s+", re.M)
 _HTML_TABLE = re.compile(r"<table\b.*?</table>", re.S | re.I)
 
 
@@ -188,42 +191,91 @@ def _tables_to_markdown(markdown: str, converter) -> str:
     return _HTML_TABLE.sub(lambda match: _html_table_to_markdown(match.group(0), converter), markdown)
 
 
-def _image_bytes(image, fmt: str = "PNG") -> bytes:
+def _image_bytes(image) -> bytes:
     buffer = BytesIO()
-    image.save(buffer, format=fmt)
+    image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
-def _place_images(
-    markdown: str,
-    images: dict,
+def _picture_markdown(
+    page_image,
+    bbox: list[int],
     page_number: int,
+    index: int,
     mode: str,
     output_path: Path,
     assets_dir: Path,
     assets: list[Path],
 ) -> str:
-    """Replace Chandra's image references according to the requested image mode."""
-    counter = 0
+    """Crop one figure from the rendered page and reference it per image mode."""
+    left, top, right, bottom = bbox
+    if mode == "placeholder" or right - left < 2 or bottom - top < 2:
+        return IMAGE_PLACEHOLDER
+    crop = page_image.crop((left, top, right, bottom))
+    if mode == "embed":
+        encoded = base64.b64encode(_image_bytes(crop)).decode("ascii")
+        return f"![Image](data:image/png;base64,{encoded})"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    path = assets_dir / f"page-{page_number:04d}-image-{index}.png"
+    path.write_bytes(_image_bytes(crop))
+    assets.append(path)
+    relative = Path(os.path.relpath(path, output_path.parent)).as_posix()
+    return f"![Image]({quote(relative)})"
 
-    def replace(match: re.Match[str]) -> str:
-        nonlocal counter
-        alt, target = match.group(1), match.group(2)
-        image = images.get(target)
-        if image is None or mode == "placeholder":
-            return IMAGE_PLACEHOLDER
-        counter += 1
-        if mode == "embed":
-            encoded = base64.b64encode(_image_bytes(image)).decode("ascii")
-            return f"![{alt}](data:image/png;base64,{encoded})"
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        path = assets_dir / f"page-{page_number:04d}-image-{counter}.png"
-        path.write_bytes(_image_bytes(image))
-        assets.append(path)
-        relative = Path(os.path.relpath(path, output_path.parent)).as_posix()
-        return f"![{alt}]({quote(relative)})"
 
-    return _MARKDOWN_IMAGE.sub(replace, markdown)
+def _text_block_markdown(label: str, html: str, converter) -> str:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    # Chandra sometimes emits <img> tags in text blocks; they carry no image.
+    for image in soup.find_all("img"):
+        image.decompose()
+    html = str(soup).strip()
+    if label == "Text" and not re.search(r"<.+>", html):
+        html = f"<p>{html}</p>"
+    markdown = _tables_to_markdown(converter.convert(html), converter)
+    # A bullet glyph or number kept inside a list item would follow the Markdown marker.
+    markdown = _DOUBLED_BULLET.sub(r"\1", markdown)
+    markdown = _DOUBLED_NUMBER.sub(r"\1\2. ", markdown)
+    return markdown.strip()
+
+
+def page_markdown(
+    raw: str,
+    page_image,
+    page_number: int,
+    mode: str,
+    output_path: Path,
+    assets_dir: Path,
+    assets: list[Path],
+    converter=None,
+) -> str:
+    """Turn one page of Chandra's layout HTML into Markdown.
+
+    Page headers and footers are dropped, as with Docling. For pictures only
+    the crop is kept: Chandra is prompted to describe images, chart values
+    and diagrams in its own words, and that text is not in the source.
+    """
+    from chandra.output import parse_layout
+
+    converter = converter or _markdown_converter()
+    blocks = []
+    pictures = 0
+    for block in parse_layout(raw, page_image):
+        if block.label in SKIPPED_LABELS:
+            continue
+        if block.label in PICTURE_LABELS:
+            pictures += 1
+            blocks.append(
+                _picture_markdown(
+                    page_image, block.bbox, page_number, pictures, mode, output_path, assets_dir, assets
+                )
+            )
+            continue
+        markdown = _text_block_markdown(block.label, block.content, converter)
+        if markdown:
+            blocks.append(markdown)
+    return "\n\n".join(blocks)
 
 
 def convert_pdf(
@@ -252,7 +304,7 @@ def convert_pdf(
             page_number = first + offset
             (result,) = engine.manager.generate(
                 [BatchInputItem(image=image, prompt_type="ocr_layout")],
-                include_images=True,
+                include_images=False,
                 include_headers_footers=False,
                 **engine.generate_kwargs,
             )
@@ -264,11 +316,9 @@ def convert_pdf(
                 warnings.append(
                     f"Page {page_number}: Chandra output ends in a repetition loop; check this page."
                 )
-            markdown = _tables_to_markdown(result.markdown, converter)
-            markdown = _place_images(
-                markdown, result.images, page_number, images, output_path, assets_dir, assets
+            parts.append(
+                page_markdown(result.raw, image, page_number, images, output_path, assets_dir, assets, converter)
             )
-            parts.append(markdown.strip())
         del pages
 
     markdown = "\n\n".join(part for part in parts if part)

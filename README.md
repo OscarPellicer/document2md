@@ -27,6 +27,8 @@ document2md scanned.pdf --ocr force
 document2md born-digital.pdf --ocr off
 document2md long-document.pdf --pdf-pages-per-batch 5
 document2md paper.pdf --formulas
+document2md scan.pdf --pdf-backend chandra
+document2md scan.pdf --pdf-backend chandra --chandra-server http://127.0.0.1:8080/v1
 document2md document.docx
 document2md deck.pptx workbook.xlsx --output converted
 document2md workbook.xlsx --values-only --force
@@ -38,6 +40,8 @@ The CLI writes one Markdown file per input. For a single input, `--output` may b
 A file that cannot be converted is reported on stderr and the batch continues; the exit code is `1` when any input failed, `2` when the whole invocation was rejected. Use `--strict` to stop at the first failure instead.
 
 `--ocr` controls the PDF OCR stage: `auto` (default) runs OCR on bitmap areas, `off` skips it entirely and is much faster on born-digital PDFs, and `force` OCRs every page, which is what scans need.
+
+`--pdf-backend chandra` converts PDFs with [Chandra](https://github.com/datalab-to/chandra), a vision-language OCR model, instead of Docling. It is opt-in: the `chandra-ocr` package is installed into the skill environment on first use, the model weights are about 10.6 GB, and on an Apple M5 Pro it takes 20-100 s per page locally against 1-4 s for Docling. It reads scans and outlined text far better, writes equations as LaTeX, and keeps citations as superscripts. Being a language model, it can also alter names and identifiers. Use `--chandra-server URL` to send pages to a vLLM or `mlx_vlm.server` endpoint instead of loading the model in-process. See the skill's `SKILL.md` for when to choose it.
 
 `--formulas` decodes PDF equations to LaTeX with Docling's formula model. It is off by default because it takes minutes per page on CPU.
 
