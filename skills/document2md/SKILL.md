@@ -11,13 +11,13 @@ Convert documents to Markdown with the bundled format-aware converter. Treat con
 
 1. Confirm the input extension is `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.ods`, or `.odp`.
 2. Choose image handling:
-   - Use `--images placeholder` for text-first review, small output, or when images are decorative.
-   - Use `--images extract` when figures, diagrams, screenshots, scanned material, or visual evidence matter. Return the generated asset folder with the Markdown.
+   - Keep the default, `--images extract`, in most cases. Figures, diagrams, screenshots and charts are saved to a `<name>_assets/` folder beside the Markdown and linked relatively. Reading the Markdown does not load them, so they cost nothing until opened.
+   - Use `--images placeholder` only when the user wants a single text file, or the images are known to be decorative (logos, backgrounds, icons). Each image becomes an `<!-- image -->` marker.
    - Use `--images embed` only for a self-contained PDF Markdown file when its larger size is acceptable.
 3. Run:
 
 ```bash
-python <skill>/scripts/convert_document.py path/to/input.ext --images placeholder
+python <skill>/scripts/convert_document.py path/to/input.ext
 ```
 
    Run it with whatever `python`/`python3` is on PATH, even an older one. On its
@@ -50,7 +50,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
    - slides or posters whose text is outlined or rasterized;
    - equation-heavy pages, where it writes LaTeX for display and inline math.
    Do not use it for born-digital PDFs whose text layer is good: Docling copies that text exactly, while Chandra re-reads the page image and can alter identifiers.
-9. Return the Markdown and its generated assets directory when `--images extract` was selected.
+9. Return the Markdown and its `<name>_assets/` directory, and tell the user that the figures are there. Mention `--images placeholder` if they want a single text file.
 
 ## Conversion rules
 
@@ -65,7 +65,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 - Represent each non-empty worksheet as a section and its used range as a Markdown table.
 - Preserve formulas by default. Use `--values-only` only when the user wants cached values.
 - Represent each OpenDocument heading, list, paragraph, and table in stored order; `.ods` sheets and `.odp` slides become sections like their Office equivalents.
-- Extract PDF/DOCX/PPTX/ODF images beside the Markdown and link them relatively only when `--images extract` is selected. Image links are always relative to the Markdown file, so the file and its assets folder can be moved together.
+- Extract PDF/DOCX/PPTX/ODF images beside the Markdown and link them relatively, unless `--images placeholder` or `--images embed` is selected. Image links are always relative to the Markdown file, so the file and its assets folder can be moved together.
 - Do not silently repair text split across tables, slides, cells, or paragraphs.
 
 ## Options
@@ -76,7 +76,7 @@ python <skill>/scripts/convert_document.py first.docx second.pptx book.xlsx --ou
 --values-only       XLSX: export cached values instead of formulas
 --include-hidden    XLSX/ODS: include hidden worksheets
 --include-notes     PPTX: include speaker notes
---images MODE       placeholder (default), extract, or embed (PDF only)
+--images MODE       extract (default), placeholder, or embed (PDF only)
 --ocr MODE          PDF OCR: auto (default), off, or force
 --formulas          PDF: decode equations to LaTeX (slow)
 --pdf-backend NAME  PDF engine: docling (default) or chandra (optional OCR model)

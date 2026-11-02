@@ -159,7 +159,7 @@ def test_pdf_conversion_handles_comment_thread_end_to_end(
         converter_module, "_pdf_stream", lambda path, batch_number=0: SimpleNamespace()
     )
 
-    convert_file(COMMENT_THREAD_PDF, output, ConversionOptions(force=True))
+    convert_file(COMMENT_THREAD_PDF, output, ConversionOptions(images="placeholder", force=True))
     markdown = output.read_text(encoding="utf-8")
 
     assert (
@@ -236,7 +236,7 @@ def test_pdf_conversion_inserts_comment_markers_without_real_docling(
         converter_module, "_pdf_stream", lambda path, batch_number=0: SimpleNamespace()
     )
 
-    convert_file(ANNOTATED_PDF, output, ConversionOptions(force=True))
+    convert_file(ANNOTATED_PDF, output, ConversionOptions(images="placeholder", force=True))
     markdown = output.read_text(encoding="utf-8")
 
     assert "precipitation dataset shows a clear seasonal pattern[^c1]" in markdown
@@ -276,7 +276,7 @@ def test_pdf_conversion_without_comments_is_unaffected(tmp_path: Path, monkeypat
         converter_module, "_pdf_stream", lambda path, batch_number=0: SimpleNamespace()
     )
 
-    convert_file(source, output, ConversionOptions(force=True))
+    convert_file(source, output, ConversionOptions(images="placeholder", force=True))
     markdown = output.read_text(encoding="utf-8")
 
     assert markdown == "Just some plain markdown.\n"

@@ -12,8 +12,8 @@
 - Docling's parser can drop the spaces between words on tightly set fonts. After conversion, each text block (paragraphs, headings, list items, captions; never table cells) is re-read from the same bounding box with PDFium, and the PDFium reading replaces Docling's only when both contain exactly the same letters and digits. That repair can change spacing, dashes, quotes and list-marker placement, never words. Line-end hyphens are kept between capitals or digits (`FUSAR-KLIP`) and removed elsewhere.
 - Equations are emitted as `<!-- formula-not-decoded -->` unless `--formulas` is passed, which runs Docling's formula model and writes LaTeX. The model is slow on CPU (minutes per page) and can pull neighbouring text into an equation.
 - Extracted and embedded pictures are rendered at 2x (144 dpi).
-- `--images placeholder` keeps lightweight image-position markers.
-- `--images extract` asks Docling to write referenced image artifacts to the accompanying assets folder.
+- `--images extract` (the default) asks Docling to write referenced image artifacts to the accompanying `<name>_assets/` folder.
+- `--images placeholder` keeps lightweight `<!-- image -->` position markers and skips picture rendering, which makes PDF conversion somewhat faster.
 - Extracted image links are relative to the Markdown file. Docling emits absolute, percent-encoded URIs when handed an absolute artifacts directory, so the converter passes a relative one and rewrites any absolute link that remains.
 - With more than one page batch, each batch's images go into a `pages-NNNN-NNNN` subfolder of the assets directory; a single batch writes them flat.
 - `--ocr auto` OCRs bitmap areas only, `--ocr off` disables the OCR stage, and `--ocr force` OCRs every page.
@@ -43,7 +43,7 @@
 - Real Word heading styles map to Markdown headings.
 - Character-level bold and italic formatting is retained where practical.
 - Tables use the physical Word grid. Merged-cell text appears once and duplicate grid positions remain empty.
-- Inline drawing extraction is best-effort when `--images extract` is selected.
+- Inline drawing extraction is best-effort in the default `--images extract` mode.
 - Headers, footers, comments, tracked-change history, text boxes, equations, and exact pagination are not reconstructed.
 
 ## PPTX
@@ -52,7 +52,7 @@
 - The title placeholder supplies the slide heading when present.
 - Text boxes become paragraphs; tables become Markdown tables.
 - Shapes are ordered top-to-bottom, then left-to-right, with original shape order as a tie-breaker.
-- Pictures are extracted and linked only when `--images extract` is selected.
+- Pictures are extracted and linked in the default `--images extract` mode.
 - Charts, SmartArt, transitions, animations, and visual positioning are not reproduced.
 - Speaker notes are optional.
 
@@ -75,7 +75,7 @@
 - Tables use the stored grid. Repeated cells and rows are expanded, and cells covered by a merge stay empty.
 - Sheets hidden with `table:display="false"` are skipped unless `--include-hidden` is passed, and each skipped sheet is reported as a warning.
 - Each `draw:page` becomes a slide section, named by its `draw:name` when present.
-- Images referenced from the archive are extracted only when `--images extract` is selected.
+- Images referenced from the archive are extracted in the default `--images extract` mode.
 - Form controls, change tracking, styles, and page layout are not reconstructed.
 
 ## Batches and failures

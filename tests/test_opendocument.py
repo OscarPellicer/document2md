@@ -90,7 +90,7 @@ def test_odt_images_are_only_written_when_requested(tmp_path: Path) -> None:
     source = _write_opendocument(tmp_path / "figura.odt", body, {"Pictures/figura.png": b"png-bytes"})
 
     placeholder = convert_file(
-        source, tmp_path / "placeholder.md", options=ConversionOptions(force=True)
+        source, tmp_path / "placeholder.md", options=ConversionOptions(images="placeholder", force=True)
     )
     assert placeholder.assets == []
     assert not (tmp_path / "placeholder_assets").exists()

@@ -288,7 +288,7 @@ def test_pdf_is_processed_in_ordered_page_ranges_with_ascii_stream_names(
     convert_file(
         source,
         output,
-        ConversionOptions(force=True, pdf_pages_per_batch=10),
+        ConversionOptions(images="placeholder", force=True, pdf_pages_per_batch=10),
     )
 
     assert calls == [

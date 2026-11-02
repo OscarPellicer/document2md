@@ -11,8 +11,8 @@ The repository is skill-first: the canonical implementation lives inside `skills
 - Keep worksheets separated and represent their used ranges as tables.
 - Use real Office metadata, such as Word heading styles and PowerPoint titles, when available.
 - Do not hard-wrap prose.
-- Extract embedded images to a neighboring assets directory.
-- Let callers choose placeholder, extracted, or PDF-embedded image handling.
+- Extract embedded images to a neighboring `<name>_assets/` directory by default.
+- Let callers choose placeholder or PDF-embedded image handling instead.
 - Make lossy decisions explicit and deterministic.
 - Link extracted images relatively, so a Markdown file and its assets folder can be moved together.
 - Never report success for a file that was not written.
@@ -22,7 +22,8 @@ The repository is skill-first: the canonical implementation lives inside `skills
 
 ```powershell
 python -m pip install -e .
-document2md document.pdf --images extract
+document2md document.pdf                       # figures go to document_assets/
+document2md document.pdf --images placeholder  # single text file, <!-- image --> markers
 document2md scanned.pdf --ocr force
 document2md born-digital.pdf --ocr off
 document2md long-document.pdf --pdf-pages-per-batch 5
@@ -50,7 +51,7 @@ PDF inputs are passed to Docling through an ASCII-named memory stream, so paths 
 The script creates and reuses its own `.venv` (see [Skill](#skill)), so for local development the gitignored `.venv` already contains all runtime and test dependencies:
 
 ```powershell
-.\.venv\Scripts\document2md.exe input.pdf --images extract
+.\.venv\Scripts\document2md.exe input.pdf
 .\.venv\Scripts\python.exe -m pytest
 ```
 

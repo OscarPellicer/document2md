@@ -33,7 +33,7 @@ class ConversionOptions:
     values_only: bool = False
     include_hidden: bool = False
     include_notes: bool = False
-    images: str = "placeholder"
+    images: str = "extract"
     force: bool = False
     assets_dir: Path | None = None
     pdf_pages_per_batch: int = 10

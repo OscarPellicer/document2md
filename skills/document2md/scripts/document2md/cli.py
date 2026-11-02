@@ -29,8 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--images",
         choices=["placeholder", "extract", "embed"],
-        default="placeholder",
-        help="Image handling: placeholders, extracted files, or PDF-only base64 embedding.",
+        default="extract",
+        help="Image handling: extracted files (default), placeholders, or PDF-only base64 embedding.",
     )
     parser.add_argument(
         "--ocr",
